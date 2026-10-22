@@ -1,13 +1,13 @@
 #include "PluginEditor.h"
 #include "BinaryData.h"
-#include "xuno/Rom.h"
+#include "xuno/Lecturas.h"
 
 namespace
 {
     using escoita::U;
     using escoita::numero;
 
-    constexpr double LOOP_MS = 4.2335;   // o bucle da CPU de voces
+    namespace lec = xuno::lectura;   // as contas (tamén as usa Barullo Xuntos)
 
     juce::String tempo (double ms)
     {
@@ -17,37 +17,19 @@ namespace
     juce::String percent (int v) { return juce::String (juce::roundToInt (v * 100.0 / 127.0)) + " %"; }
 
     // o que significa cada deslizador, coas táboas da ROM
-    juce::String lfoRateText (int v)
-    {
-        const int half = (8192 + xuno::rom::LFO_SPEED[v] - 1) / xuno::rom::LFO_SPEED[v];
-        const double hz = 1000.0 / (4.0 * half * LOOP_MS);
-        return numero (hz, hz < 1.0 ? 2 : 1) + " Hz";
-    }
-    juce::String lfoDelayText (int v)
-    {
-        const int inc = xuno::rom::ENV_ATTACK[v], ramp = xuno::rom::LFO_DELAY_RAMP[(v >> 4) & 7];
-        const int ticks = (0x4000 + inc - 1) / inc + (ramp >= 0xffff ? 0 : (65536 + ramp - 1) / ramp);
-        return v == 0 ? juce::String ("0 ms") : tempo (ticks * LOOP_MS);
-    }
-    juce::String dcoLfoText (int v) { return U ("±") + juce::String (juce::roundToInt (xuno::rom::LFO_DEPTH[v] / 255.0 * 398.0)) + " c"; }
-    juce::String pwmText (int v)
-    {
-        const double pw = 16383.0 - (2.0 * v) * 16383.0 / 256.0;
-        return juce::String (juce::roundToInt ((1.0 - xuno::pulseThreshold ((uint16_t) pw)) * 100.0)) + " %";
-    }
+    juce::String lfoRateText (int v) { const double hz = lec::lfoHz (v); return numero (hz, hz < 1.0 ? 2 : 1) + " Hz"; }
+    juce::String lfoDelayText (int v) { return v == 0 ? juce::String ("0 ms") : tempo (lec::lfoAtrasoMs (v)); }
+    juce::String dcoLfoText (int v) { return U ("±") + juce::String (juce::roundToInt (lec::dcoLfoCents (v))) + " c"; }
+    juce::String pwmText (int v) { return juce::String (juce::roundToInt (lec::pwmPorcento (v))) + " %"; }
     juce::String vcfFreqText (int v)
     {
-        const double hz = xuno::vcfHz ((double) ((v << 7) >> 2));
+        const double hz = lec::vcfFrecuencia (v);
         return hz < 1000.0 ? juce::String (juce::roundToInt (hz)) + " Hz" : numero (hz / 1000.0, hz < 10000.0 ? 2 : 1) + " kHz";
     }
     juce::String octText (double o, bool both) { return (both ? U ("±") : juce::String ("+")) + numero (o, 1) + " oit"; }
-    juce::String levelText (int v) { const double db = -10.0 + 20.0 * (double) (v << 7) / 16256.0; return (db >= 0.05 ? "+" : "") + numero (db, 1) + " dB"; }
-    juce::String attackText (int v) { const int inc = xuno::rom::ENV_ATTACK[v]; return tempo ((double) ((0x3fff + inc - 1) / inc) * LOOP_MS); }
-    juce::String decayText (int v)
-    {
-        const double c = xuno::rom::ENV_DECAY[v] / 65536.0;
-        return tempo (std::ceil (std::log (0.1) / std::log (c)) * LOOP_MS);   // ata −20 dB
-    }
+    juce::String levelText (int v) { const double db = lec::vcaDb (v); return (db >= 0.05 ? "+" : "") + numero (db, 1) + " dB"; }
+    juce::String attackText (int v) { return tempo (lec::ataqueMs (v)); }
+    juce::String decayText (int v) { return tempo (lec::caidaMs (v)); }
     juce::String noteName (int midi)
     {
         static const char* n[12] = { "Do", "Do#", "Re", "Re#", "Mi", "Fa", "Fa#", "Sol", "Sol#", "La", "La#", "Si" };
@@ -628,9 +610,8 @@ void Screens::paintEnv (juce::Graphics& g, juce::Rectangle<float> r)
     paintGlass (g, r, 14.0f);
     screenTitle (g, r, "Envolvente");
     const auto p = proc.panelPatch();
-    const int inc = xuno::rom::ENV_ATTACK[p[xuno::ENV_A]];
-    const double aMs = (double) ((0x3fff + inc - 1) / inc) * LOOP_MS;
-    auto tc = [] (int v) { const double c = xuno::rom::ENV_DECAY[v] / 65536.0; return -LOOP_MS / std::log (c); };   // constante de tempo (ms)
+    const double aMs = lec::ataqueMs (p[xuno::ENV_A]);
+    auto tc = [] (int v) { const double c = xuno::rom::ENV_DECAY[v] / 65536.0; return -lec::LOOP_MS / std::log (c); };   // constante de tempo (ms)
     const double dTau = tc (p[xuno::ENV_D]), rTau = tc (p[xuno::ENV_R]);
     const double s = p[xuno::ENV_S] / 127.0;
     auto sq = [] (double ms) { return std::sqrt (std::max (ms, 1.0)); };   // escala comprimida
@@ -812,7 +793,7 @@ MainView::MainView (BXProcessor& p)
     setLookAndFeel (&look);
 
     // ---- os deslizadores, na orde do panel
-    auto vcfEnv = [] (int v) { return octText (v * 254.0 / 256.0 * 32.0 / 285.5, false); };
+    auto vcfEnv = [] (int v) { return octText (lec::vcfEnvOitavas (v), false); };
     addFader ("lfoRate", "Rate", U ("Velocidade do LFO (triangular): de 0,04 a 30 Hz."), lfoRateText);
     addFader ("lfoDelay", "Delay", U ("Canto tarda o LFO en chegar despois da primeira nota (se non soaba ningunha)."), lfoDelayText);
     addFader ("dcoLfo", "LFO", U ("Vibrato: canto move o LFO o ton (ata ±4 semitóns)."), dcoLfoText);
@@ -824,7 +805,7 @@ MainView::MainView (BXProcessor& p)
     addFader ("vcfFreq", "Freq", U ("O corte do filtro de catro polos (no Do3). Vai en 128 pasos, coma no orixinal."), vcfFreqText);
     addFader ("vcfRes", "Res", U ("Resonancia: preto do máximo o filtro oscila só."), percent);
     addFader ("vcfEnv", "Env", U ("Canto move a envolvente o corte (cara arriba ou abaixo, segundo + e −)."), vcfEnv);
-    addFader ("vcfLfo", "LFO", U ("Canto move o LFO o corte."), [] (int v) { return octText (v * 254.0 / 256.0 * 8.0 / 285.5, true); });
+    addFader ("vcfLfo", "LFO", U ("Canto move o LFO o corte."), [] (int v) { return octText (lec::vcfLfoOitavas (v), true); });
     addFader ("vcfKybd", "Kybd", U ("Canto segue o corte ás notas (ao máximo, unha oitava por oitava)."), percent);
     addFader ("vcaLevel", "Level", U ("O volume do son: ±10 dB arredor do medio."), levelText);
     addFader ("envA", "A", U ("Ataque: de inmediato a 3,3 s."), attackText);
@@ -956,13 +937,13 @@ MainView::MainView (BXProcessor& p)
     knob (tune, "tune", U ("Afinación"), U ("±½ semitón. No medio, o La3 dá 440 Hz."),
           [] (double v) { const double c = (v + 8.0) * 100.0 / 256.0; return (c >= 0.05 ? "+" : "") + numero (c, 1) + " c"; });
     knob (porta, "porta", "Portamento", U ("O tempo que tarda o ton en escorregar unha oitava."),
-          [] (double v) { const int a = (int) v; if (a == 0) return U ("0 ms"); const int c = xuno::rom::PORTA[a >> 1]; return tempo (12.0 * 256.0 / std::max (1, c) * LOOP_MS); });
+          [] (double v) { const int a = (int) v; return a == 0 ? U ("0 ms") : tempo (lec::portamentoMs (a)); });
     knob (bendDco, "bendDco", "DCO", U ("Canto move a panca (e a roda de afinación do MIDI) o ton."),
-          [] (double v) { return U ("±") + numero (0.754 * 255.0 * v / 4096.0, 1) + " st"; });
+          [] (double v) { return U ("±") + numero (lec::bendDcoSemitonos (v), 1) + " st"; });
     knob (bendVcf, "bendVcf", "VCF", U ("Canto move a panca o corte do filtro."),
-          [] (double v) { return U ("±") + numero (255.0 * v / 16.0 / 4.0 / 285.5, 1) + " oit"; });
+          [] (double v) { return U ("±") + numero (lec::bendVcfOitavas (v), 1) + " oit"; });
     knob (lfoMod, "lfoMod", "LFO", U ("Canto vibrato dá a panca empurrada (ou a roda de modulación do MIDI)."),
-          [] (double v) { return U ("±") + juce::String (juce::roundToInt (v / 255.0 * 398.0)) + " c"; });
+          [] (double v) { return U ("±") + juce::String (juce::roundToInt (lec::lfoModCents (v))) + " c"; });
     volume.slider.setDoubleClickReturnValue (true, 0.0);
     tune.slider.setDoubleClickReturnValue (true, -8.0);
     for (auto* k : { &volume, &tune, &porta, &bendDco, &bendVcf, &lfoMod })
