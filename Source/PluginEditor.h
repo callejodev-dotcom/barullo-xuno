@@ -86,14 +86,6 @@ namespace ui
         std::function<void (float, bool)> onMove;
     };
 
-    // teclado de cinco oitavas, coas teclas da familia
-    struct Keys : juce::MidiKeyboardComponent
-    {
-        using MidiKeyboardComponent::MidiKeyboardComponent;
-        void drawWhiteNote (int note, juce::Graphics&, juce::Rectangle<float>, bool down, bool over, juce::Colour, juce::Colour) override;
-        void drawBlackNote (int note, juce::Graphics&, juce::Rectangle<float>, bool down, bool over, juce::Colour) override;
-    };
-
     // a fila de pantallas: voces, o son, a onda do DCO, a envolvente e o LFO
     class Screens : public juce::Component, public juce::SettableTooltipClient
     {
@@ -145,7 +137,7 @@ namespace ui
     class MainView : public juce::Component, private juce::Timer
     {
     public:
-        static constexpr int W = 1300, H = 900;
+        static constexpr int W = 1300, H = 682;
         explicit MainView (BXProcessor&);
         ~MainView() override;
         void paint (juce::Graphics&) override;
@@ -194,7 +186,8 @@ namespace ui
         juce::TextButton groupBtn[2];
         juce::OwnedArray<juce::TextButton> bankBtns, patchBtns;
         juce::TextButton manualBtn { "Manual" }, writeBtn { "Write" };
-        bool writeArmed = false;
+        juce::TextButton listenBtn { "Escoitar" };   // mentres está premido soa un acorde (para probar os sons sen MIDI)
+        bool writeArmed = false, listening = false;
 
         // á esquerda do teclado
         Knob volume, tune, porta, bendDco, bendVcf, lfoMod;
@@ -203,10 +196,9 @@ namespace ui
 
         juce::TextButton newVersion;
         Screens screens;
-        Keys keyboard;
         Chart chart;
 
-        juce::Rectangle<int> headerArea, screensArea, controlsArea, patchArea, ctrlArea, keysArea;
+        juce::Rectangle<int> headerArea, screensArea, controlsArea, patchArea, ctrlArea;
         uint32_t seenChanges = 0;
         int slowTick = 0;
         std::unique_ptr<juce::FileChooser> chooser;

@@ -24,7 +24,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **Sons**: 128 propios, deseñados de cero para Barullo Xuno e igualados en volume:
   - **A11–A88, clásicos**: as familias dun banco de fábrica dos 80 (metais, cordas, teclas, órganos, baixos, solistas, fondos, efectos e percusión);
   - **B11–B88, Escoita**: baile, synthpop, lo-fi, as texturas da casa (Néboa, Mar de Vigo, Faro…), baixos, solistas (unha gaita, tamén), teclas e efectos.
-- **Memoria** de 128 sons que se pode gravar (WRITE e o número; gárdase co proxecto) e **MANUAL** (o son é o do panel, sen memoria), con GRUPO A/B, BANCO 1–8 e NÚMERO 1–8 coma no teclado. A **táboa de sons** amosa os 64 de cada grupo cos seus nomes.
+- **Memoria** de 128 sons que se pode gravar (WRITE e o número; gárdase co proxecto) e **MANUAL** (o son é o do panel, sen memoria), con GRUPO A/B, BANCO 1–8 e NÚMERO 1–8 coma no teclado. A **táboa de sons** amosa os 64 de cada grupo cos seus nomes, e **ESCOITAR** toca un acorde mentres está premido (para probar os sons sen teclado MIDI).
 - **Carpeta de bancos**: escolle unha carpeta e todos os .syx de Juno-106 que haxa nela aparecen como bancos. Os 128 sons de fábrica recoñécense pola súa pegada e amósanse co seu nome (os sons non van dentro do plugin). **Abrir** e **gardar** .syx dun son ou dun banco enteiro.
 - **Asignación** POLY 1, POLY 2 e unísono (no orixinal, POLY 1 e POLY 2 á vez), coma o asignador do Juno-106; **portamento** e **transposición**.
 - **Bender**: a panca (aos lados, ton e filtro; cara arriba, vibrato) cos seus tres mandos de sensibilidade.

@@ -78,6 +78,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout BXProcessor::createLayout()
 {
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout l;
+    // os interruptores van como eleccións de dúas: gardan o valor xa redondeado (un AudioParameterBool
+    // garda o que lle escriban, 0,49 por exemplo, e ao recuperar o estado non volve ao 0)
+    const StringArray onOff { "Apagado", "Aceso" };
     static const char* names[16] = { "LFO: velocidade", "LFO: atraso", "DCO: LFO", "DCO: PWM", "DCO: ruído", "VCF: frecuencia",
         "VCF: resonancia", "VCF: envolvente", "VCF: LFO", "VCF: teclado", "VCA: nivel", "ENV: ataque", "ENV: caída",
         "ENV: sustain", "ENV: relaxación", "DCO: sub" };
@@ -85,8 +88,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout BXProcessor::createLayout()
     for (int i = 0; i < 16; ++i)
         l.add (std::make_unique<AudioParameterInt> (ParameterID { sliderIds[i], 1 }, U (names[i]), 0, 127, init[(size_t) i]));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "range", 1 }, U ("DCO: rexistro"), StringArray { "16'", "8'", "4'" }, 1));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "pulse", 1 }, U ("DCO: pulso"), false));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "saw", 1 }, U ("DCO: serra"), true));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "pulse", 1 }, U ("DCO: pulso"), onOff, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "saw", 1 }, U ("DCO: serra"), onOff, 1));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chorus", 1 }, U ("Chorus"), StringArray { "Apagado", "I", "II" }, 0));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "pwmMode", 1 }, U ("DCO: PWM con"), StringArray { "LFO", "Manual" }, 1));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "envPol", 1 }, U ("VCF: polaridade da envolvente"), StringArray { "+", U ("−") }, 0));
@@ -97,16 +100,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout BXProcessor::createLayout()
         NormalisableRange<float> (-30.0f, 6.0f, 0.1f), 0.0f, AudioParameterFloatAttributes().withLabel ("dB")));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "tune", 1 }, U ("Afinación"), -128, 127, -8));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "porta", 1 }, U ("Portamento"), 0, 255, 90));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "portaOn", 1 }, U ("Portamento aceso"), false));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "portaOn", 1 }, U ("Portamento aceso"), onOff, 0));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "bendDco", 1 }, U ("Bender: DCO"), 0, 255, 43));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "bendVcf", 1 }, U ("Bender: VCF"), 0, 255, 0));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "lfoMod", 1 }, U ("Bender: LFO"), 0, 255, 110));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "poly", 1 }, U ("Asignación"), StringArray { "Poly 1", "Poly 2", U ("Unísono") }, 0));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "transpose", 1 }, U ("Transposición"), -12, 12, 0));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "instant", 1 }, U ("Notas ao instante"), true));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "variance", 1 }, U ("Voces con tolerancias"), true));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "analogNoise", 1 }, U ("Ruído do chorus"), true));
-    l.add (std::make_unique<AudioParameterBool> (ParameterID { "voices12", 1 }, U ("Doce voces"), false));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "instant", 1 }, U ("Notas ao instante"), onOff, 1));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "variance", 1 }, U ("Voces con tolerancias"), onOff, 1));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "analogNoise", 1 }, U ("Ruído do chorus"), onOff, 1));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "voices12", 1 }, U ("Doce voces"), onOff, 0));
     return l;
 }
 

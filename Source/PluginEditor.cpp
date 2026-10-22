@@ -436,49 +436,6 @@ void Lever::mouseUp (const juce::MouseEvent&)
     if (onMove) onMove (x, pushed);
 }
 
-// ================================================================ teclado
-static juce::Path keyShape (juce::Rectangle<float> r, float rad)
-{
-    juce::Path p;
-    p.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), rad, rad, false, false, true, true);
-    return p;
-}
-
-void Keys::drawWhiteNote (int note, juce::Graphics& g, juce::Rectangle<float> area, bool down, bool over, juce::Colour, juce::Colour)
-{
-    auto k = area.withTrimmedTop (4.0f).reduced (1.0f, 0.0f);
-    const auto shape = keyShape (k, 6.0f);
-    juce::Colour top = juce::Colour (0xffe9e2b6), bot = juce::Colour (0xffe4dcae);
-    if (down) { top = juce::Colour (0xfff2a33a); bot = col::laranxa; }
-    else if (over) { top = top.darker (0.06f); bot = bot.darker (0.06f); }
-    juce::ColourGradient gr (top, 0.0f, k.getY(), bot, 0.0f, k.getBottom(), false);
-    if (! down) gr.addColour (0.7, col::crema);
-    g.setGradientFill (gr);
-    g.fillPath (shape);
-    g.saveState(); g.reduceClipRegion (shape);
-    g.setColour (juce::Colours::black.withAlpha (0.14f));
-    g.fillRect (k.withTop (k.getBottom() - 4.0f));
-    g.restoreState();
-    if (note % 12 == 0)
-    {
-        g.setColour (down ? col::noite : juce::Colour (0xff2a2a2a));
-        drawCaps (g, noteName (note), k.withTrimmedBottom (7.0f), juce::Justification::centredBottom, 8.0f, 0.1f);
-    }
-}
-
-void Keys::drawBlackNote (int, juce::Graphics& g, juce::Rectangle<float> area, bool down, bool over, juce::Colour)
-{
-    auto k = area.withTrimmedTop (4.0f);
-    g.setColour (juce::Colours::black.withAlpha (0.55f));
-    g.fillPath (keyShape (k.translated (1.5f, 2.5f), 4.0f));
-    juce::Colour top = juce::Colour (0xff050810), bot = juce::Colour (0xff1c2235);
-    if (down) { top = juce::Colour (0xfff2a33a); bot = col::laranxa; }
-    else if (over) { top = top.brighter (0.25f); bot = bot.brighter (0.25f); }
-    g.setGradientFill (juce::ColourGradient (top, 0.0f, k.getY(), bot, 0.0f, k.getBottom(), false));
-    g.fillPath (keyShape (k, 4.0f));
-    g.setColour (juce::Colours::white.withAlpha (0.08f)); g.fillRect (k.getX() + 2.0f, k.getBottom() - 5.0f, k.getWidth() - 4.0f, 1.5f);
-}
-
 // ================================================================ pantallas
 void Screens::resized()
 {
@@ -837,7 +794,7 @@ Fader* MainView::addFader (const char* id, const juce::String& name, const juce:
 }
 
 MainView::MainView (BXProcessor& p)
-    : proc (p), screens (p), keyboard (p.keyboardState, juce::MidiKeyboardComponent::horizontalKeyboard), chart (p, *this)
+    : proc (p), screens (p), chart (p, *this)
 {
     setLookAndFeel (&look);
 
@@ -997,15 +954,16 @@ MainView::MainView (BXProcessor& p)
 
     addAndMakeVisible (screens);
 
-    keyboard.setAvailableRange (36, 96);
-    keyboard.setLowestVisibleKey (36);
-    keyboard.setKeyPressBaseOctave (5);
-    keyboard.setScrollButtonsVisible (false);
-    keyboard.setBlackNoteLengthProportion (0.6f);
-    keyboard.setColour (juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour (0xff04060c));   // o fondo (as teclas píntanse aparte)
-    keyboard.setColour (juce::MidiKeyboardComponent::shadowColourId, col::laranxa.withAlpha (0.35f));
-    keyboard.setColour (juce::MidiKeyboardComponent::keySeparatorLineColourId, juce::Colours::transparentBlack);
-    addAndMakeVisible (keyboard);
+    listenBtn.onStateChange = [this]
+    {
+        const bool down = listenBtn.isDown();
+        if (down == listening) return;
+        listening = down;
+        for (int n : { 48, 60, 64, 67 })
+            if (down) proc.keyboardState.noteOn (1, n, 1.0f);
+            else proc.keyboardState.noteOff (1, n, 0.0f);
+    };
+    key (listenBtn, U ("Mentres o tes premido, soa un acorde co son do panel (para probar sen teclado MIDI)."));
 
     addChildComponent (chart);
 
@@ -1273,6 +1231,7 @@ void MainView::paint (juce::Graphics& g)
 
     // a fila dos sons
     paintPanel (g, patchArea.toFloat(), 14.0f);
+    groupTitle (g, juce::Rectangle<float> ((float) patchArea.getX() + 10.0f, (float) patchArea.getY() + 8.0f, (float) patchArea.getWidth() - 20.0f, 20.0f), "Memoria");
     auto rowLabel = [&] (juce::Component& first, juce::Component& last, const juce::String& t)
     {
         auto b = first.getBounds().getUnion (last.getBounds()).expanded (4).toFloat();
@@ -1283,16 +1242,18 @@ void MainView::paint (juce::Graphics& g)
     rowLabel (groupBtn[0], groupBtn[1], "Grupo");
     rowLabel (*bankBtns[0], *bankBtns[7], "Banco");
     rowLabel (*patchBtns[0], *patchBtns[7], U ("Número"));
-    paintWell (g, manualBtn.getBounds().getUnion (writeBtn.getBounds()).expanded (4).toFloat(), 10.0f);
+    paintWell (g, writeBtn.getBounds().getUnion (manualBtn.getBounds()).expanded (4).toFloat(), 10.0f);
+    paintWell (g, listenBtn.getBounds().expanded (4).toFloat(), 10.0f);
 
     // á esquerda do teclado
     paintPanel (g, ctrlArea.toFloat(), 14.0f);
     {
         auto c = ctrlArea.toFloat();
-        groupTitle (g, juce::Rectangle<float> (c.getX() + 6.0f, c.getY() + 10.0f, c.getWidth() - 100.0f, 20.0f), U ("Xeral"));
-        groupTitle (g, juce::Rectangle<float> (c.getX() + 6.0f, (float) bendDco.getY() - 26.0f, c.getWidth() - 12.0f, 20.0f), "Bender");
+        groupTitle (g, juce::Rectangle<float> ((float) volume.getX(), c.getY() + 8.0f, (float) (porta.getX() - volume.getX()), 20.0f), U ("Xeral"));
+        groupTitle (g, juce::Rectangle<float> ((float) bendDco.getX(), c.getY() + 8.0f, c.getRight() - 10.0f - (float) bendDco.getX(), 20.0f), "Bender");
+        g.setColour (col::crema3);
+        drawCaps (g, "LFO trig", lever.getBounds().toFloat().translated (0.0f, -16.0f).withHeight (12.0f), juce::Justification::centred, 7.5f, 0.2f);
     }
-    paintPanel (g, keysArea.toFloat(), 14.0f);
 
     // o pé: Escoita, a axuda e as coordenadas
     {
@@ -1316,9 +1277,8 @@ void MainView::resized()
     headerArea = { x0, 14, w, 52 };
     screensArea = { x0, 76, w, 142 };
     controlsArea = { x0, 228, w, 282 };
-    patchArea = { x0, 520, w, 54 };
-    ctrlArea = { x0, 584, 252, H - 584 - 30 };
-    keysArea = { x0 + 262, 584, w - 262, H - 584 - 30 };
+    ctrlArea = { x0, 520, 548, H - 520 - 30 };
+    patchArea = { x0 + 558, 520, w - 558, H - 520 - 30 };
 
     // cabeceira
     {
@@ -1379,28 +1339,27 @@ void MainView::resized()
 
     // a fila dos sons
     {
-        const int y = patchArea.getY() + 12, h = 30;
-        int px = patchArea.getX() + 78;
-        groupBtn[0].setBounds (px, y, 46, h); groupBtn[1].setBounds (px + 50, y, 46, h); px += 96 + 80;
-        for (int i = 0; i < 8; ++i) bankBtns[i]->setBounds (px + i * 46, y, 42, h);
-        px += 8 * 46 + 86;
-        for (int i = 0; i < 8; ++i) patchBtns[i]->setBounds (px + i * 46, y, 42, h);
-        px += 8 * 46 + 18;
-        manualBtn.setBounds (px, y, 88, h); writeBtn.setBounds (px + 92, y, 80, h);
+        // dúas filas: grupo e banco (e WRITE); escoitar, número (e MANUAL)
+        const int h = 30, y1 = patchArea.getY() + 24, y2 = y1 + 50;
+        const int gx = patchArea.getX() + 78, bx = gx + 96 + 92;
+        groupBtn[0].setBounds (gx, y1, 46, h); groupBtn[1].setBounds (gx + 50, y1, 46, h);
+        listenBtn.setBounds (gx, y2, 96, h);
+        for (int i = 0; i < 8; ++i) { bankBtns[i]->setBounds (bx + i * 42, y1, 38, h); patchBtns[i]->setBounds (bx + i * 42, y2, 38, h); }
+        const int wx = bx + 8 * 42 + 14;
+        writeBtn.setBounds (wx, y1, patchArea.getRight() - 12 - wx, h);
+        manualBtn.setBounds (wx, y2, patchArea.getRight() - 12 - wx, h);
     }
 
     // á esquerda do teclado
     {
-        const int cx = ctrlArea.getX() + 8, kw = 78, kh = 84;
-        int y = ctrlArea.getY() + 34;
+        // unha soa fila: xeral (volume, afinación, portamento) e bender (tres mandos e a panca)
+        const int cx = ctrlArea.getX() + 10, kw = 66, kh = 96, y = ctrlArea.getY() + 28;
         volume.setBounds (cx, y, kw, kh); tune.setBounds (cx + kw, y, kw, kh); porta.setBounds (cx + 2 * kw, y, kw, kh);
-        y += kh + 30;
-        bendDco.setBounds (cx, y, kw, kh); bendVcf.setBounds (cx + kw, y, kw, kh); lfoMod.setBounds (cx + 2 * kw, y, kw, kh);
-        portaOn.setBounds (ctrlArea.getRight() - 84, ctrlArea.getY() + 8, 74, 22);
-        lever.setBounds (cx + 8, ctrlArea.getBottom() - 52, ctrlArea.getWidth() - 32, 42);
+        const int bx = cx + 3 * kw + 18;
+        bendDco.setBounds (bx, y, kw, kh); bendVcf.setBounds (bx + kw, y, kw, kh); lfoMod.setBounds (bx + 2 * kw, y, kw, kh);
+        portaOn.setBounds (porta.getX() + 2, ctrlArea.getY() + 6, kw - 4, 20);
+        lever.setBounds (bx + 3 * kw + 8, y + 18, ctrlArea.getRight() - 10 - (bx + 3 * kw + 8), 48);
     }
-    keyboard.setBounds (keysArea.reduced (12, 10));
-    keyboard.setKeyWidth ((float) keyboard.getWidth() / 36.0f);
     newVersion.setBounds (W / 2 - 170, H - 27, 340, 22);
 }
 } // namespace ui
