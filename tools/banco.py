@@ -3,6 +3,8 @@
 #   Grupo A: CLÁSICOS, as familias dun banco de fábrica dos 80.
 #   Grupo B: ESCOITA, sons para baile, synthpop, lo-fi e as texturas da casa.
 # Cada son son os 18 bytes do Juno-106 (os mesmos que van no SysEx), un nome e unha descrición.
+# Algúns levan tamén o que o Juno-106 non garda co son: o portamento (porta=tempo, 0–255) e a
+# asignación (modo: 0 POLY 1, 1 POLY 2, 2 unísono).
 #
 # Uso: python3 tools/banco.py [tools/niveis.txt] > Source/Banco.h
 #   niveis.txt (opcional): a sonoridade de cada son medida co banco SEN igualar
@@ -12,14 +14,14 @@ import sys
 
 def P(name, desc, rate=0, delay=0, dlfo=0, pwm=0, noise=0, freq=127, res=0, env=0, vlfo=0, kybd=0,
       level=64, a=0, d=0, s=127, r=10, sub=0, rng=8, pulse=False, saw=True, chorus=0,
-      pwmlfo=False, neg=False, gate=False, hpf=1):
+      pwmlfo=False, neg=False, gate=False, hpf=1, porta=None, modo=0):
     sw1 = {16: 1, 8: 2, 4: 4}[rng] | (8 if pulse else 0) | (16 if saw else 0)
     sw1 |= {0: 0x60, 1: 0x40, 2: 0x00}[chorus]          # apagado (lémbrase I), I, II
     sw2 = (0 if pwmlfo else 1) | (2 if neg else 0) | (4 if gate else 0) | ((3 - hpf) << 3)
     vals = [rate, delay, dlfo, pwm, noise, freq, res, env, vlfo, kybd, level, a, d, s, r, sub, sw1, sw2]
     for i, v in enumerate(vals):
         assert 0 <= v <= 127, (name, i, v)
-    return (name, desc, vals)
+    return (name, desc, vals, (porta, modo))
 
 A = [
     # ---- A1 metais
@@ -245,14 +247,14 @@ B = [
     P("Baixo 16 pés", "Serra en 16': o baixo máis grave do Juno.",
       rng=16, freq=44, res=10, env=30, kybd=40, a=0, d=60, s=60, r=12, hpf=0),
     P("Baixo deslizante", "Para tocar co portamento e POLY 2.",
-      sub=60, freq=46, res=30, env=20, kybd=60, a=0, s=110, r=14),
+      sub=60, freq=46, res=30, env=20, kybd=60, a=0, s=110, r=14, porta=90, modo=1),
     # ---- B6 solistas
     P("Solista Barullo", "Serra e sub, resonancia e vibrato: o solista da casa.",
       sub=50, freq=60, res=40, env=34, kybd=80, a=0, d=60, s=90, r=24, dlfo=22, delay=56, rate=72, chorus=1),
     P("Sinal de radio", "Pulso estreito que se move rápido, co paso alto.",
       saw=False, pulse=True, pwm=60, pwmlfo=True, rate=70, freq=74, res=26, kybd=80, a=0, s=120, r=16, hpf=3),
     P("Deslizante", "Cadrada e serra para tocar co portamento.",
-      pulse=True, freq=64, res=24, env=20, kybd=80, a=0, s=120, r=20, dlfo=16, delay=60, rate=70),
+      pulse=True, freq=64, res=24, env=20, kybd=80, a=0, s=120, r=20, dlfo=16, delay=60, rate=70, porta=90, modo=1),
     P("Asubío do faro", "O filtro oscilando, cun vibrato lento.",
       saw=False, pulse=False, freq=60, res=120, kybd=127, a=20, s=110, r=40, dlfo=30, rate=30, chorus=1, level=74),
     P("Solista de pulso", "Pulso medio, ataque inmediato.",
@@ -311,11 +313,11 @@ if len(sys.argv) > 1:
         meas[int(k)] = float(v)
     target = -16.0
     out = []
-    for i, (n, d, v) in enumerate(allp):
+    for i, (n, d, v, x) in enumerate(allp):
         if i in meas:
             v = list(v)
             v[10] = max(0, min(127, int(round(v[10] + (target - meas[i]) / 0.157))))
-        out.append((n, d, v))
+        out.append((n, d, v, x))
     allp = out
 
 print('// Banco.h — Xerado por tools/banco.py. Non editar a man.')
@@ -323,11 +325,14 @@ print('// Os 128 sons propios de Barullo Xuno: A11–A88 clásicos, B11–B88 Es
 print('#pragma once')
 print('#include <cstdint>\n')
 print('namespace xuno::bank {\n')
-print('struct Entry { const char* name; const char* desc; uint8_t p[18]; };\n')
+print('// o portamento e a asignación van co son (o Juno-106 non os garda): portaOn, porta (0–255) e mode')
+print('// (0 POLY 1, 1 POLY 2, 2 unísono)')
+print('struct Entry { const char* name; const char* desc; uint8_t p[18]; bool portaOn = false; uint8_t porta = 90; uint8_t mode = 0; };\n')
 print('inline const Entry PATCHES[128] = {')
-for i, (n, d, v) in enumerate(allp):
+for i, (n, d, v, (porta, modo)) in enumerate(allp):
     lab = ('A' if i < 64 else 'B') + str((i % 64) // 8 + 1) + str(i % 8 + 1)
+    extra = '' if porta is None and modo == 0 else ', %s, %d, %d' % ('true' if porta is not None else 'false', 90 if porta is None else porta, modo)
     print('    { "%s", "%s",' % (n, d))
-    print('      { %s } },   // %s' % (', '.join(str(x) for x in v), lab))
+    print('      { %s }%s },   // %s' % (', '.join(str(x) for x in v), extra, lab))
 print('};\n')
 print('} // namespace xuno::bank')

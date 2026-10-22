@@ -293,8 +293,8 @@ int main (int argc, char** argv)
         auto voicesFor = [&] (int assign)
         {
             BXProcessor p;
+            p.selectSource (0); p.selectPatch (8);   // cordas, relaxación longa (e o son leva POLY 1: a asignación, despois)
             if (auto* prm = p.apvts.getParameter ("poly")) prm->setValueNotifyingHost (prm->convertTo0to1 ((float) assign));
-            p.selectSource (0); p.selectPatch (8);   // cordas, relaxación longa
             p.setPlayConfigDetails (0, 2, sr, 512); p.prepareToPlay (sr, 512);
             juce::AudioBuffer<float> buf (2, 512);
             int maxActive = 0;
@@ -322,6 +322,47 @@ int main (int argc, char** argv)
         check (d < 1.0e-6f, "bloques de 512 e de 37 mostras: iguais", juce::String::formatted ("(diferenza %g; %.2f s de CPU para %.1f s, %.0fx)", d, c1, secs, secs / c1));
         std::printf ("pegada da saída: %016llx\n", (unsigned long long) pegada (x));
         if (argc > 1 && ! mode.startsWith ("--")) writeWav (juce::File (mode), x, sr);
+    }
+    {   // o portamento e a asignación van co son: os propios, WRITE, o estado, o MIDI; os do .syx non os tocan
+        BXProcessor p;
+        auto play = [&] { return juce::String ((int) getParam (p, "portaOn")) + "/" + juce::String ((int) getParam (p, "porta")) + "/" + juce::String ((int) getParam (p, "poly")); };
+        p.selectSource (0);
+        p.selectPatch (64 + 5 * 8 + 2);                           // B63 Deslizante: porta aceso e POLY 2
+        const bool propio = play() == "1/90/1" && ! p.isEdited();
+        p.selectPatch (8);                                        // A21 Cordas: sen porta, POLY 1
+        const bool volve = play() == "0/90/0";
+        setParam (p, "portaOn", 1.0f); setParam (p, "porta", 150.0f); setParam (p, "poly", 2.0f);
+        const bool editado = p.isEdited();
+        p.writeTo (77);
+        p.selectPatch (0); p.selectPatch (77);
+        const bool gardado = play() == "1/150/2" && ! p.isEdited();
+        juce::MemoryBlock mb; p.getStateInformation (mb);
+        BXProcessor b; b.setStateInformation (mb.getData(), (int) mb.getSize());
+        b.selectPatch (0);
+        b.selectPatch (77);
+        const bool estado = juce::String ((int) getParam (b, "portaOn")) + "/" + juce::String ((int) getParam (b, "porta")) + "/" + juce::String ((int) getParam (b, "poly")) == "1/150/2";
+        // os dun .syx non o levan: queda coma estaba
+        const auto f = juce::File::createTempFile (".syx");
+        p.saveBankFile (f, 0);
+        juce::String msg; p.loadSyxFile (f, msg); f.deleteFile();
+        setParam (p, "poly", 1.0f);
+        p.selectPatch (3);
+        const bool syx = play() == "1/150/1";
+        // cambio de programa polo MIDI: o motor xa vai en POLY 2 antes de que a interface mova os parámetros
+        BXProcessor m;
+        m.selectSource (0);
+        m.setPlayConfigDetails (0, 2, sr, 512); m.prepareToPlay (sr, 512);
+        juce::AudioBuffer<float> buf (2, 512);
+        juce::MidiBuffer mm; mm.addEvent (juce::MidiMessage::programChange (1, 64 + 5 * 8 + 2), 0);
+        m.processBlock (buf, mm);
+        const bool xa = m.synthMode() == 1;
+        juce::MidiBuffer baleiro; m.processBlock (buf, baleiro);
+        const bool sigue = m.synthMode() == 1;
+        m.serviceMessages();
+        m.processBlock (buf, baleiro);
+        const bool despois = m.synthMode() == 1 && getParam (m, "poly") > 0.5f && getParam (m, "portaOn") > 0.5f;
+        check (propio && volve && editado && gardado && estado && syx && xa && sigue && despois, "portamento e asignación co son",
+               juce::String::formatted ("(%d%d%d%d%d%d%d%d%d)", propio, volve, editado, gardado, estado, syx, xa, sigue, despois));
     }
     {   // A/B (do núcleo): cada lado co seu panel, a súa memoria e a súa función
         BXProcessor p;

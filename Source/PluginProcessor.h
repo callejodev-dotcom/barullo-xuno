@@ -51,11 +51,22 @@ public:
     // identificadores dos 16 deslizadores (na orde do SysEx)
     static const char* const sliderIds[16];
 
+    // o que o Juno-106 non garda co son pero Barullo Xuno si: o portamento (aceso e tempo) e a
+    // asignación. Os sons dun .syx non o levan («set» falso): ao escollelos, iso queda coma estaba.
+    struct Play
+    {
+        bool set = false, portaOn = false;
+        int porta = 90, mode = 0;   // 0–255; 0 POLY 1, 1 POLY 2, 2 unísono
+        bool operator== (const Play& o) const { return set == o.set && portaOn == o.portaOn && porta == o.porta && mode == o.mode; }
+        bool operator!= (const Play& o) const { return ! (*this == o); }
+    };
+
     // ---- memoria (só desde o fío da interface) ----
     int getSource() const { return source; }
     int getPatchNum() const { return patchNum; }
     bool isManual() const { return manual; }
     const xuno::Patch& patchAt (int src, int i) const;
+    const Play& playAt (int src, int i) const;
     juce::String sourceName (int src) const;      // «MEMORIA», «XUNO», …
     juce::String sourceTitle (int src) const;
     juce::String patchName (int src, int i) const;   // nome (os propios e os de fábrica coñecidos)
@@ -74,6 +85,8 @@ public:
     void setManual();                             // MANUAL: o panel queda solto, sen memoria
     xuno::Patch panelPatch() const;               // o son do panel (os parámetros)
     void setPanel (const xuno::Patch&);           // move os parámetros a un son
+    Play panelPlay() const;                       // o portamento e a asignación de agora
+    void setPlay (const Play&);                   // se o son os leva, móveos
     bool isEdited() const;
     void writeTo (int slot);                      // WRITE: garda o panel na memoria
     void copySourceToInternal();
@@ -104,6 +117,7 @@ public:
     float uiScale = 1.0f;
     std::array<std::atomic<int>, xuno::MAXV> voiceNote {};
     void serviceMessages() { timerCallback(); }   // o mesmo que fai o temporizador (para as probas)
+    int synthMode() const { return synth.mode(); } // a asignación que usa o motor agora (para as probas)
 
 private:
     xuno::Synth synth;
@@ -114,6 +128,7 @@ private:
         uint64_t hash = 0;
         bool own = false;              // o banco propio (ten nomes e descricións)
         std::array<xuno::Patch, 128> patches {};
+        std::array<Play, 128> play {};  // só o propio
         int size = 128;
     };
     std::vector<Bank> banks;           // primeiro o propio, despois os da carpeta
@@ -121,6 +136,7 @@ private:
     std::unique_ptr<juce::PropertiesFile> settings;
     int sourceForHash (uint64_t h) const;
     std::array<xuno::Patch, 128> internal {}, fileBank {};
+    std::array<Play, 128> internalPlay {}, fileBankPlay {};   // o .syx aberto non os leva
     juce::String fileBankName;
     bool fileBankLoaded = false;
     int source = 0, patchNum = 0;
@@ -134,17 +150,25 @@ private:
 
     std::array<xuno::Patch, 128>& bankOf (int src);
     const std::array<xuno::Patch, 128>& bankOf (int src) const;
+    std::array<Play, 128>& playOf (int src);
+    void goTo (int src, int i);   // o panel (e, se o leva, o portamento e a asignación) a un son
 
     // fío de audio
     xuno::Patch lastParamPatch {};
     std::array<xuno::Patch, 128> audioBank {};
+    std::array<Play, 128> audioPlay {};
     juce::SpinLock bankLock;
     std::array<xuno::Patch, 128> sharedBank {};
+    std::array<Play, 128> sharedPlay {};
     bool bankDirty = false;
     void publishBank();
 
     // do fío de audio á interface
     std::atomic<int> pendingProgram { -1 };
+    // un cambio de programa que leva portamento e asignación: o motor úsaos xa, ata que a interface
+    // move os parámetros (bit 0 = hai, 1 = porta aceso, 2–3 = asignación, 8–15 = tempo)
+    std::atomic<uint32_t> playForce { 0 };
+    static uint32_t encodePlay (const Play& p) { return p.set ? 1u | (p.portaOn ? 2u : 0u) | ((uint32_t) p.mode << 2) | ((uint32_t) p.porta << 8) : 0u; }
     juce::AbstractFifo sysexFifo { 1 << 14 };
     std::vector<uint8_t> sysexBuf = std::vector<uint8_t> (1 << 14);
     void pushSysex (const uint8_t* data, int size);

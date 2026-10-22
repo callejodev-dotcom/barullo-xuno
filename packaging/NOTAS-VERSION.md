@@ -6,6 +6,7 @@ Unha ferramenta de [Escoita](https://www.escoita.link).
 
 - A primeira versión: o panel enteiro (LFO, DCO, HPF, VCF, VCA, ENV e chorus), 128 sons propios (A, clásicos; B, Escoita), memoria de 128 que se pode gravar, carpeta de bancos .syx (os sons de fábrica recoñécense e amósanse co seu nome), POLY 1, POLY 2 e unísono, portamento, transposición, bender e MIDI con SysEx de Roland.
 - Función: notas ao instante ou co tempo do orixinal, voces con tolerancias, ruído do chorus e doce voces.
+- O portamento e a asignación (POLY 1, POLY 2, unísono) gárdanse con cada son da memoria e do banco propio.
 - Presets propios (`.bxpreset`, gardan todo), A/B para comparar e desfacer e refacer (cada clic é un paso).
 - Limitador de seguridade: a saída nunca pasa de −1 dBFS.
 

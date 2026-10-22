@@ -5,7 +5,9 @@
 
 namespace xuno::bank {
 
-struct Entry { const char* name; const char* desc; uint8_t p[18]; };
+// o portamento e a asignación van co son (o Juno-106 non os garda): portaOn, porta (0–255) e mode
+// (0 POLY 1, 1 POLY 2, 2 unísono)
+struct Entry { const char* name; const char* desc; uint8_t p[18]; bool portaOn = false; uint8_t porta = 90; uint8_t mode = 0; };
 
 inline const Entry PATCHES[128] = {
     { "Metais", "Metais de sintetizador: o filtro ábrese co ataque e pecha ata media altura.",
@@ -215,13 +217,13 @@ inline const Entry PATCHES[128] = {
     { "Baixo 16 pés", "Serra en 16': o baixo máis grave do Juno.",
       { 0, 0, 0, 0, 0, 44, 10, 30, 0, 40, 57, 0, 60, 60, 12, 0, 113, 25 } },   // B57
     { "Baixo deslizante", "Para tocar co portamento e POLY 2.",
-      { 0, 0, 0, 0, 0, 46, 30, 20, 0, 60, 118, 0, 0, 110, 14, 60, 114, 17 } },   // B58
+      { 0, 0, 0, 0, 0, 46, 30, 20, 0, 60, 118, 0, 0, 110, 14, 60, 114, 17 }, true, 90, 1 },   // B58
     { "Solista Barullo", "Serra e sub, resonancia e vibrato: o solista da casa.",
       { 72, 56, 22, 0, 0, 60, 40, 34, 0, 80, 96, 0, 60, 90, 24, 50, 82, 17 } },   // B61
     { "Sinal de radio", "Pulso estreito que se move rápido, co paso alto.",
       { 70, 0, 0, 60, 0, 74, 26, 0, 0, 80, 110, 0, 0, 120, 16, 0, 106, 0 } },   // B62
     { "Deslizante", "Cadrada e serra para tocar co portamento.",
-      { 70, 60, 16, 0, 0, 64, 24, 20, 0, 80, 28, 0, 0, 120, 20, 0, 122, 17 } },   // B63
+      { 70, 60, 16, 0, 0, 64, 24, 20, 0, 80, 28, 0, 0, 120, 20, 0, 122, 17 }, true, 90, 1 },   // B63
     { "Asubío do faro", "O filtro oscilando, cun vibrato lento.",
       { 30, 0, 30, 0, 0, 60, 120, 0, 0, 127, 98, 20, 0, 110, 40, 0, 66, 17 } },   // B64
     { "Solista de pulso", "Pulso medio, ataque inmediato.",

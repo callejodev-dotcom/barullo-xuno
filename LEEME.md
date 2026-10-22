@@ -31,6 +31,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
   - **A/B**: dous xogos de axustes para comparar; cambiar de lado garda o actual;
   - **desfacer e refacer** (as frechas): os deslizadores e as teclas, escoller son ou banco, WRITE, MANUAL, copiar un banco na memoria, abrir un .syx, os presets e o A/B. Cada clic é un paso.
 - **Asignación** POLY 1, POLY 2 e unísono (no orixinal, POLY 1 e POLY 2 á vez), coma o asignador do Juno-106; **portamento** e **transposición**.
+- **O portamento e a asignación van co son**, cousa que o Juno-106 non fai: cada son propio e cada número da memoria lembra se leva portamento, o seu tempo e se vai en POLY 1, POLY 2 ou unísono, e WRITE gárdao (B58 e B63, por exemplo, escorregan sós). Os .syx non teñen sitio para iso: ao escoller un son dun .syx, o portamento e a asignación quedan coma estaban.
 - **Bender**: a panca (aos lados, ton e filtro; cara arriba, vibrato) cos seus tres mandos de sensibilidade.
 - **MIDI**: notas, pedal (CC64: o HOLD da CPU de voces; as voces soltas quedan no sustain, pero o asignador pode collelas para notas novas, coma no orixinal), roda de afinación, roda de modulación (CC1, co mando LFO do bender), «all notes off» e cambio de programa = son A11–B88. **SysEx de Roland**: un son ($30, $31) vai ao panel e os cambios de parámetro ($32) móveno ao momento.
 - **Pantallas**: as seis voces co nivel e a nota de cada unha, o son, a forma de onda que dá o DCO, a envolvente cos seus tempos e o LFO.
@@ -81,6 +82,7 @@ Usa o núcleo común de Escoita ([escoita-nucleo](https://github.com/callejodev-
 - **Bloques**: con bloques de 512 e de 37 mostras a saída é a mesma, mostra a mostra.
 - **Os 128 sons** soan, sen valores non numéricos.
 - **Estado**: memoria, son, panel e tamaño da xanela gárdanse e recupéranse iguais.
+- **Portamento e asignación co son**: os propios póñenos, WRITE gárdaos co estado, os sons dun .syx non os tocan e, cun cambio de programa polo MIDI, o motor xa os usa desde esa mesma mostra.
 - **A/B, presets propios e desfacer**: cada lado garda o seu panel, a súa memoria e a súa función; un preset gardado cárgase igual; desfanse e refanse un deslizador, escoller un son e WRITE, cada un no seu paso.
 - **Limitador**: o son máis forte, nun acorde de seis notas co volume a +6 dB, non pasa de −1 dBFS.
 - **Pegada da saída**: FNV-1a de 64 bits das mostras dun render fixo, para ver que un cambio de organización non move nin un bit do son.

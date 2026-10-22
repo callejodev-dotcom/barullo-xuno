@@ -43,13 +43,16 @@ BXProcessor::BXProcessor()
     own.own = true;
     for (int k = 0; k < 128; ++k)
     {
+        const auto& e = xuno::bank::PATCHES[k];
         auto& p = own.patches[(size_t) k];
-        for (int b = 0; b < xuno::PATCH_SIZE; ++b) p[(size_t) b] = xuno::bank::PATCHES[k].p[b];
+        for (int b = 0; b < xuno::PATCH_SIZE; ++b) p[(size_t) b] = e.p[b];
         xuno::normalize (p);
+        own.play[(size_t) k] = { true, e.portaOn, e.porta, e.mode };
     }
     own.hash = xuno::bankHash (own.patches.data(), 128);
     banks.push_back (own);
     internal = banks[0].patches;   // a memoria empeza cos sons propios
+    internalPlay = banks[0].play;
     for (auto& p : fileBank) p = xuno::initPatch();
 
     // a carpeta de bancos lémbrase nun ficheiro de axustes do usuario
@@ -65,7 +68,7 @@ BXProcessor::BXProcessor()
    #endif
 
     source = INTERNAL; patchNum = 0;
-    setPanel (internal[0]);
+    goTo (INTERNAL, 0);
     lastParamPatch = patchFromParams();
     synth.setPatch (lastParamPatch);
     publishBank();
@@ -185,6 +188,19 @@ void BXProcessor::setPanel (const xuno::Patch& in)
     changes.fetch_add (1);
 }
 
+BXProcessor::Play BXProcessor::panelPlay() const
+{
+    return { true, portaOnParam->load() > 0.5f, (int) std::lround (portaParam->load()), (int) std::lround (polyParam->load()) };
+}
+
+void BXProcessor::setPlay (const Play& p)
+{
+    if (! p.set) return;
+    setParamValue ("portaOn", p.portaOn ? 1.0f : 0.0f);
+    setParamValue ("porta", (float) p.porta);
+    setParamValue ("poly", (float) p.mode);
+}
+
 // ================================================================ carpeta de bancos
 void BXProcessor::setBankFolder (const juce::File& f)
 {
@@ -253,7 +269,21 @@ std::array<xuno::Patch, 128>& BXProcessor::bankOf (int src)
 }
 const std::array<xuno::Patch, 128>& BXProcessor::bankOf (int src) const { return const_cast<BXProcessor*> (this)->bankOf (src); }
 
+std::array<BXProcessor::Play, 128>& BXProcessor::playOf (int src)
+{
+    if (src == INTERNAL) return internalPlay;
+    if (src == FILE_BANK) return fileBankPlay;
+    return banks[(size_t) juce::jlimit (0, numBanks() - 1, src)].play;
+}
+
 const xuno::Patch& BXProcessor::patchAt (int src, int i) const { return bankOf (src)[(size_t) juce::jlimit (0, 127, i)]; }
+const BXProcessor::Play& BXProcessor::playAt (int src, int i) const { return const_cast<BXProcessor*> (this)->playOf (src)[(size_t) juce::jlimit (0, 127, i)]; }
+
+void BXProcessor::goTo (int src, int i)
+{
+    setPanel (bankOf (src)[(size_t) i]);
+    setPlay (playOf (src)[(size_t) i]);
+}
 
 juce::String BXProcessor::patchLabel (int i)
 {
@@ -306,6 +336,7 @@ void BXProcessor::publishBank()
     {
         const juce::SpinLock::ScopedLockType lk (bankLock);
         sharedBank = bankOf (source);
+        sharedPlay = playOf (source);
         bankDirty = true;
     }
     changes.fetch_add (1);
@@ -316,7 +347,7 @@ void BXProcessor::selectSource (int src)
     if (src == FILE_BANK && ! fileBankLoaded) return;
     source = (src == FILE_BANK || src == INTERNAL) ? src : juce::jlimit (0, numBanks() - 1, src);
     manual = false;
-    setPanel (bankOf (source)[(size_t) patchNum]);
+    goTo (source, patchNum);
     publishBank();
     updateHostDisplay (ChangeDetails().withProgramChanged (true));
 }
@@ -325,7 +356,7 @@ void BXProcessor::selectPatch (int i)
 {
     patchNum = juce::jlimit (0, 127, i);
     manual = false;
-    setPanel (bankOf (source)[(size_t) patchNum]);
+    goTo (source, patchNum);
     changes.fetch_add (1);
     updateHostDisplay (ChangeDetails().withProgramChanged (true));
 }
@@ -335,13 +366,15 @@ void BXProcessor::setManual() { manual = true; changes.fetch_add (1); }
 bool BXProcessor::isEdited() const
 {
     if (manual) return false;
-    return patchFromParams() != bankOf (source)[(size_t) patchNum];
+    const auto& play = playAt (source, patchNum);
+    return patchFromParams() != bankOf (source)[(size_t) patchNum] || (play.set && panelPlay() != play);
 }
 
 void BXProcessor::writeTo (int slot)
 {
     slot = juce::jlimit (0, 127, slot);
     internal[(size_t) slot] = patchFromParams();
+    internalPlay[(size_t) slot] = panelPlay();   // e tamén o portamento e a asignación
     source = INTERNAL; patchNum = slot; manual = false;
     publishBank();
     updateHostDisplay (ChangeDetails().withProgramChanged (true));
@@ -351,6 +384,7 @@ void BXProcessor::copySourceToInternal()
 {
     if (source == INTERNAL) return;
     internal = bankOf (source);
+    internalPlay = playOf (source);
     source = INTERNAL;
     publishBank();
     updateHostDisplay (ChangeDetails().withProgramChanged (true));
@@ -384,6 +418,7 @@ bool BXProcessor::loadSyxFile (const juce::File& f, juce::String& message)
     }
     const auto bank = xuno::sysexToBank (sp);
     for (size_t k = 0; k < 128; ++k) fileBank[k] = k < bank.size() ? bank[k] : xuno::initPatch();
+    fileBankPlay.fill ({});
     fileBankName = f.getFileNameWithoutExtension().toUpperCase().substring (0, 10);
     fileBankLoaded = true;
     selectSource (FILE_BANK);
@@ -451,9 +486,12 @@ void BXProcessor::timerCallback()
     const int prog = pendingProgram.exchange (-1);
     if (prog >= 0)
     {
-        // o fío de audio xa cambiou o son; aquí só se move o panel
+        // o fío de audio xa cambiou o son; aquí só se move o panel (e o portamento e a asignación,
+        // que o motor xa usa: despois diso volve mandar o que digan os parámetros)
+        auto forced = playForce.load();
         patchNum = prog; manual = false;
-        setPanel (bankOf (source)[(size_t) patchNum]);
+        goTo (source, patchNum);
+        playForce.compare_exchange_strong (forced, 0u);
         updateHostDisplay (ChangeDetails().withProgramChanged (true));
     }
     while (sysexFifo.getNumReady() >= 2)
@@ -491,10 +529,16 @@ void BXProcessor::applyPerformance()
     if (o.instant != cur.instant || o.variance != cur.variance || o.analogNoise != cur.analogNoise || o.voices != cur.voices)
         synth.setOptions (o);
     synth.setTune (0x80 + (int) std::lround (tuneParam->load()));
-    synth.setPortamento ((int) std::lround (portaParam->load()), portaOnParam->load() > 0.5f);
+    bool portaOn = portaOnParam->load() > 0.5f;
+    int porta = (int) std::lround (portaParam->load()), mode = (int) std::lround (polyParam->load());
+    if (const auto f = playForce.load(); (f & 1u) != 0)   // un cambio de programa que a interface aínda non levou aos parámetros
+    {
+        portaOn = (f & 2u) != 0; mode = (int) ((f >> 2) & 3u); porta = (int) ((f >> 8) & 0xffu);
+    }
+    synth.setPortamento (porta, portaOn);
     synth.setBendSens ((int) std::lround (bendDcoParam->load()), (int) std::lround (bendVcfParam->load()));
     synth.setLfoSens ((int) std::lround (lfoModParam->load()));
-    synth.setMode ((int) std::lround (polyParam->load()));
+    synth.setMode (mode);
     synth.setTranspose ((int) std::lround (transposeParam->load()));
     synth.setLever ((double) lever.load(), leverPushed.load());
 }
@@ -510,7 +554,7 @@ void BXProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     synth.reset();
     {
         const juce::SpinLock::ScopedLockType lk (bankLock);
-        audioBank = sharedBank; bankDirty = false;
+        audioBank = sharedBank; audioPlay = sharedPlay; bankDirty = false;
     }
     volS = juce::Decibels::decibelsToGain ((double) volumeParam->load());
     teito.preparar (sampleRate, 0.080, 0.891);
@@ -536,6 +580,12 @@ void BXProcessor::handleMidi (const juce::MidiMessage& m)
     {
         const int p = m.getProgramChangeNumber() & 127;   // como o Juno-106: 128 memorias
         synth.setPatch (audioBank[(size_t) p]);
+        if (const auto& play = audioPlay[(size_t) p]; play.set)
+        {
+            playForce.store (encodePlay (play));
+            synth.setPortamento (play.porta, play.portaOn);
+            synth.setMode (play.mode);
+        }
         pendingProgram.store (p);
     }
     else if (m.isSysEx())
@@ -570,7 +620,7 @@ void BXProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     keyboardState.processNextMidiBuffer (midi, 0, n, true);
     {
         const juce::SpinLock::ScopedTryLockType lk (bankLock);
-        if (lk.isLocked() && bankDirty) { audioBank = sharedBank; bankDirty = false; }
+        if (lk.isLocked() && bankDirty) { audioBank = sharedBank; audioPlay = sharedPlay; bankDirty = false; }
     }
     applyPerformance();
 
@@ -641,6 +691,9 @@ juce::ValueTree BXProcessor::memoria() const
     m.setProperty ("manual", manual, nullptr);
     m.setProperty ("chorusLevel", (int) chorusLevelBit, nullptr);
     m.setProperty ("internal", b64 (xuno::bankToSysex (std::vector<xuno::Patch> (internal.begin(), internal.end()))), nullptr);
+    std::vector<uint8_t> play;   // dous bytes por son: (hai, porta aceso, asignación) e o tempo
+    for (const auto& p : internalPlay) { play.push_back ((uint8_t) ((p.set ? 1 : 0) | (p.portaOn ? 2 : 0) | (p.mode << 2))); play.push_back ((uint8_t) p.porta); }
+    m.setProperty ("play", b64 (play), nullptr);
     if (fileBankLoaded)
     {
         m.setProperty ("file", b64 (xuno::bankToSysex (std::vector<xuno::Patch> (fileBank.begin(), fileBank.end()))), nullptr);
@@ -661,6 +714,9 @@ void BXProcessor::setMemoria (const juce::ValueTree& m)
     };
     const auto in = xuno::sysexToBank (xuno::parseSysex (unb64 (m.getProperty ("internal").toString())));
     if (in.size() >= 128) for (size_t k = 0; k < 128; ++k) internal[k] = in[k];
+    const auto play = unb64 (m.getProperty ("play").toString());
+    for (size_t k = 0; k < 128; ++k)
+        internalPlay[k] = play.size() == 256 ? Play { (play[2 * k] & 1) != 0, (play[2 * k] & 2) != 0, play[2 * k + 1], juce::jlimit (0, 2, play[2 * k] >> 2) } : Play {};
     fileBankLoaded = false;
     if (m.hasProperty ("file"))
     {

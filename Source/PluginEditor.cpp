@@ -941,7 +941,7 @@ MainView::MainView (BXProcessor& p)
         showMessage (writeArmed ? U ("WRITE: escolle grupo e banco, e preme o número onde gardar o panel (na memoria).") : juce::String());
         refreshKeys();
     };
-    key (writeBtn, U ("WRITE: garda o panel na memoria (despois, preme un número)."));
+    key (writeBtn, U ("WRITE: garda o panel na memoria, co portamento e a asignación (despois, preme un número)."));
 
     // ---- á esquerda do teclado
     auto knob = [this] (Knob& k, const char* id, const juce::String& name, const juce::String& tip, std::function<juce::String (double)> fmt)
