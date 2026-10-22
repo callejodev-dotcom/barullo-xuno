@@ -148,14 +148,18 @@ namespace ui
         void showMessage (const juce::String& m) { screens.setMessage (m); }
         void chooseBank();
         void timerCallback() override;
+        void mouseDown (const juce::MouseEvent&) override;   // (global) cada clic, un paso de desfacer
 
     private:
         void openSyx();
-        void saveMenu();
+        void saveSyx (bool bank);
+        void showPresetsMenu();
+        void refreshState();   // o lado do A/B e se hai algo que desfacer ou refacer
         void functionMenu();
         void transposeMenu();
         void chooseFolder();
         void pressPatch (int number);
+        void pressSlot (int slot);
         void pressBank (int bank);
         void pressGroup (int group);
         void refreshKeys();
@@ -178,7 +182,9 @@ namespace ui
         std::unique_ptr<juce::ParameterAttachment> rangeAtt, pulseAtt, sawAtt, chorusAtt, pwmAtt, envAtt, vcaAtt, polyAtt, transpAtt, portaOnAtt;
 
         // cabeceira
-        juce::TextButton bankBtn, chartBtn { "Sons" }, openBtn { "Abrir" }, saveBtn { "Gardar" };
+        juce::TextButton bankBtn, chartBtn { "Sons" };
+        // presets propios, A/B e desfacer (do núcleo común)
+        juce::TextButton presetsBtn { "Presets" }, abBtn[2], undoBtn, redoBtn;
         juce::TextButton poly1 { "Poly 1" }, poly2 { "Poly 2" }, unison { escoita::U ("Unísono") };
         juce::TextButton transpBtn, funcBtn { escoita::U ("Función") };
 

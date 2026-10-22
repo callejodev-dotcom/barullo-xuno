@@ -25,10 +25,14 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
   - **A11–A88, clásicos**: as familias dun banco de fábrica dos 80 (metais, cordas, teclas, órganos, baixos, solistas, fondos, efectos e percusión);
   - **B11–B88, Escoita**: baile, synthpop, lo-fi, as texturas da casa (Néboa, Mar de Vigo, Faro…), baixos, solistas (unha gaita, tamén), teclas e efectos.
 - **Memoria** de 128 sons que se pode gravar (WRITE e o número; gárdase co proxecto) e **MANUAL** (o son é o do panel, sen memoria), con GRUPO A/B, BANCO 1–8 e NÚMERO 1–8 coma no teclado. A **táboa de sons** amosa os 64 de cada grupo cos seus nomes, e **ESCOITAR** toca un acorde mentres está premido (para probar os sons sen teclado MIDI).
-- **Carpeta de bancos**: escolle unha carpeta e todos os .syx de Juno-106 que haxa nela aparecen como bancos. Os 128 sons de fábrica recoñécense pola súa pegada e amósanse co seu nome (os sons non van dentro do plugin). **Abrir** e **gardar** .syx dun son ou dun banco enteiro.
+- **Carpeta de bancos**: escolle unha carpeta e todos os .syx de Juno-106 que haxa nela aparecen como bancos. Os 128 sons de fábrica recoñécense pola súa pegada e amósanse co seu nome (os sons non van dentro do plugin). **Abrir** e **gardar** .syx dun son ou dun banco enteiro (no menú do banco).
+- **Presets propios, A/B e desfacer**:
+  - **PRESETS**: garda e carga todo (o panel, a memoria, o banco escollido, o .syx aberto e a función) en ficheiros `.bxpreset`, en Documentos/Barullo Xuno/Presets; no mesmo menú, abrir a carpeta e copiar entre A e B;
+  - **A/B**: dous xogos de axustes para comparar; cambiar de lado garda o actual;
+  - **desfacer e refacer** (as frechas): os deslizadores e as teclas, escoller son ou banco, WRITE, MANUAL, copiar un banco na memoria, abrir un .syx, os presets e o A/B. Cada clic é un paso.
 - **Asignación** POLY 1, POLY 2 e unísono (no orixinal, POLY 1 e POLY 2 á vez), coma o asignador do Juno-106; **portamento** e **transposición**.
 - **Bender**: a panca (aos lados, ton e filtro; cara arriba, vibrato) cos seus tres mandos de sensibilidade.
-- **MIDI**: notas, pedal (CC64), roda de afinación, roda de modulación (CC1, co mando LFO do bender), «all notes off» e cambio de programa = son A11–B88. **SysEx de Roland**: un son ($30, $31) vai ao panel e os cambios de parámetro ($32) móveno ao momento.
+- **MIDI**: notas, pedal (CC64: o HOLD da CPU de voces; as voces soltas quedan no sustain, pero o asignador pode collelas para notas novas, coma no orixinal), roda de afinación, roda de modulación (CC1, co mando LFO do bender), «all notes off» e cambio de programa = son A11–B88. **SysEx de Roland**: un son ($30, $31) vai ao panel e os cambios de parámetro ($32) móveno ao momento.
 - **Pantallas**: as seis voces co nivel e a nota de cada unha, o son, a forma de onda que dá o DCO, a envolvente cos seus tempos e o LFO.
 - **Función**:
   - *Notas ao instante* (por defecto): cada nota empeza na súa mostra. Apagado, co tempo do orixinal: as ordes do asignador polo porto serie a 31 250 baudios (un acorde de seis notas tarda uns 6 ms en chegar enteiro e un cambio de son asenta parámetro a parámetro) e o bucle da CPU de 4,2 ms;
@@ -44,7 +48,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **O DCO** (`Source/xuno/Voice.h`): un contador do 8253 en modo 3 (a conta nova entra en cada medio ciclo) a 1, 2 ou 4 MHz descarga un integrador; o pulso sae dun comparador coa rampa e o sub dun biestable. O tempo vai en tics de 8 MHz enteiros e os saltos, no seu instante exacto con polyBLEP. O ton ten os mesmos erros de redondeo ca o orixinal (±3 cents) e as notas máis altas perden nivel cando o DAC da rampa satura.
 - **O VCF**: catro OTA en serie (IR3109), cada un cun tanh, e a realimentación por un VCA que satura; resolto sen atraso. O corte segue as dúas referencias do axuste do manual de servizo.
 - **A placa** (`Source/xuno/Board.h`): o HPF (o realce de graves cos valores do esquema; 236 e 754 Hz), o VCA xeral (±10 dB) e o chorus: dous MN3009 de verdade, cada un co seu reloxo movido polo LFO do chorus en contrafase, mostrando o sinal en cada pulso, cos seus filtros de entrada e de saída.
-- Todo vai a 190 476 Hz (8 MHz / 42) e pasa á frecuencia do DAW cun filtro de fase mínima (sen latencia).
+- Todo vai a 190 476 Hz (8 MHz / 42) e pasa á frecuencia do DAW cun filtro de fase mínima (sen latencia). Á saída, un limitador de seguridade: nunca pasa de −1 dBFS.
 
 ## Estrutura
 
@@ -62,9 +66,9 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 | `Source/Conhecidos.h` | As pegadas e os nomes dos sons de fábrica (xeradas por `tools/conhecidos.py`) |
 | `Source/Plugin*.cpp` | O plugin e a interface |
 | `tools/enginetest.cpp` | Proba do motor sen JUCE: afinación, LFO, envolventes, VCF, velocidade |
-| `tools/RenderTest.cpp` | Proba do plugin: SysEx, programas, estado, .syx, asignación, bloques e os 128 sons |
+| `tools/RenderTest.cpp` | Proba do plugin: SysEx, programas, estado, .syx, asignación, bloques, A/B, presets, desfacer, o limitador e os 128 sons |
 
-Usa o núcleo común de Escoita ([escoita-nucleo](https://github.com/callejodev-dotcom/escoita-nucleo), v0.1.0): o texto en galego, o aviso das versións novas, a CI e os instaladores.
+Usa o núcleo común de Escoita ([escoita-nucleo](https://github.com/callejodev-dotcom/escoita-nucleo), v0.2.0): o texto en galego, o aviso das versións novas, os presets propios, o A/B e o desfacer (`escoita::Estado`; a memoria vai coma estado propio), o limitador de seguridade (`escoita::Teito`), a CI e os instaladores. O pedal e o reparto de voces son os do firmware do Juno-106 emulado, non `Sostido` e `Voces` do núcleo: esas reteñen as notas co pedal e cambiarían o que soa.
 
 ## Probas
 
@@ -77,6 +81,9 @@ Usa o núcleo común de Escoita ([escoita-nucleo](https://github.com/callejodev-
 - **Bloques**: con bloques de 512 e de 37 mostras a saída é a mesma, mostra a mostra.
 - **Os 128 sons** soan, sen valores non numéricos.
 - **Estado**: memoria, son, panel e tamaño da xanela gárdanse e recupéranse iguais.
+- **A/B, presets propios e desfacer**: cada lado garda o seu panel, a súa memoria e a súa función; un preset gardado cárgase igual; desfanse e refanse un deslizador, escoller un son e WRITE, cada un no seu paso.
+- **Limitador**: o son máis forte, nun acorde de seis notas co volume a +6 dB, non pasa de −1 dBFS.
+- **Pegada da saída**: FNV-1a de 64 bits das mostras dun render fixo, para ver que un cambio de organización non move nin un bit do son.
 - **Validación**: pluginval ao nivel máximo (10), auval no Mac e clap-validator.
 
 Na CI van todas en Mac, Windows e Linux, e tamén con AddressSanitizer e UBSan (`tools/probas-ci.sh`).

@@ -11,7 +11,7 @@ const char* const BXProcessor::sliderIds[16] = { "lfoRate", "lfoDelay", "dcoLfo"
 
 BXProcessor::BXProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "BarulloXuno", createLayout())
+      apvts (*this, &undo, "BarulloXuno", createLayout())
 {
     for (int i = 0; i < 16; ++i) sliderParams[(size_t) i] = apvts.getRawParameterValue (sliderIds[i]);
     rangeParam = apvts.getRawParameterValue ("range");
@@ -513,10 +513,14 @@ void BXProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         audioBank = sharedBank; bankDirty = false;
     }
     volS = juce::Decibels::decibelsToGain ((double) volumeParam->load());
+    teito.preparar (sampleRate, 0.080, 0.891);
     right.assign ((size_t) juce::jmax (1, samplesPerBlock), 0.0f);
     keyboardState.reset();
 }
 
+// O MIDI vai ao Juno emulado: o pedal é o HOLD da CPU de voces (a voz solta queda no sustain, pero o
+// asignador xa a dá por libre e pode collela outra nota) e o reparto é o do asignador. Por iso aquí
+// non se usan Sostido e Voces do núcleo: retendo as notas, cambiarían o que soa.
 void BXProcessor::handleMidi (const juce::MidiMessage& m)
 {
     if (m.isNoteOn()) synth.noteOn (m.getNoteNumber());
@@ -594,7 +598,8 @@ void BXProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     if (pos < n) synth.render (L + pos, R + pos, n - pos);
     if (anyMidi) midiActivity.fetch_add (1);
 
-    // volume (suavizado)
+    // volume (suavizado) e o limitador de seguridade do núcleo: teito a −1 dBFS, ataque
+    // instantáneo, solta en 80 ms e sen anticipación (non engade latencia)
     const double volT = juce::Decibels::decibelsToGain ((double) volumeParam->load());
     const double sm = 1.0 - std::exp (-1.0 / (0.02 * sr));
     const bool stereo = buffer.getNumChannels() > 1;
@@ -604,7 +609,8 @@ void BXProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     {
         volS += (volT - volS) * sm;
         double l = (double) L[i] * volS, r = (double) R[i] * volS;
-        if (! stereo) l = 0.5 * (l + r);
+        if (stereo) teito.procesar (l, r);
+        else l = teito.procesar (0.5 * (l + r));
         L[i] = (float) l;
         if (outR != nullptr) outR[i] = (float) r;
         peak = std::max ({ peak, std::abs ((float) l), std::abs ((float) r) });
@@ -623,13 +629,12 @@ void BXProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
 }
 
 // ================================================================ estado
-void BXProcessor::getStateInformation (juce::MemoryBlock& destData)
+// a memoria enteira: a fonte, o son, MANUAL, o chorus lembrado, a memoria interna e o último .syx
+// aberto. A fonte gárdase pola súa pegada: os bancos da carpeta poden cambiar de orde.
+juce::ValueTree BXProcessor::memoria() const
 {
-    auto st = apvts.copyState();
-    st.removeChild (st.getChildWithName ("Memoria"), nullptr);
     juce::ValueTree m ("Memoria");
     auto b64 = [] (const std::vector<uint8_t>& d) { return juce::Base64::toBase64 (d.data(), d.size()); };
-    // a fonte gárdase pola súa pegada: os bancos da carpeta poden cambiar de orde
     m.setProperty ("source", source == INTERNAL ? juce::String ("int") : source == FILE_BANK ? juce::String ("file")
                              : juce::String (std::to_string (banks[(size_t) source].hash)), nullptr);
     m.setProperty ("patch", patchNum, nullptr);
@@ -641,7 +646,72 @@ void BXProcessor::getStateInformation (juce::MemoryBlock& destData)
         m.setProperty ("file", b64 (xuno::bankToSysex (std::vector<xuno::Patch> (fileBank.begin(), fileBank.end()))), nullptr);
         m.setProperty ("fileName", fileBankName, nullptr);
     }
-    st.appendChild (m, nullptr);
+    return m;
+}
+
+void BXProcessor::setMemoria (const juce::ValueTree& m)
+{
+    if (! m.isValid()) return;
+    auto unb64 = [] (const juce::String& s)
+    {
+        juce::MemoryOutputStream out;
+        if (! juce::Base64::convertFromBase64 (out, s)) return std::vector<uint8_t>();
+        const auto* p = static_cast<const uint8_t*> (out.getData());
+        return std::vector<uint8_t> (p, p + out.getDataSize());
+    };
+    const auto in = xuno::sysexToBank (xuno::parseSysex (unb64 (m.getProperty ("internal").toString())));
+    if (in.size() >= 128) for (size_t k = 0; k < 128; ++k) internal[k] = in[k];
+    fileBankLoaded = false;
+    if (m.hasProperty ("file"))
+    {
+        const auto fb = xuno::sysexToBank (xuno::parseSysex (unb64 (m.getProperty ("file").toString())));
+        if (fb.size() >= 2)
+        {
+            for (size_t k = 0; k < 128; ++k) fileBank[k] = k < fb.size() ? fb[k] : xuno::initPatch();
+            fileBankLoaded = true;
+            fileBankName = m.getProperty ("fileName").toString().substring (0, 10);
+        }
+    }
+    const auto key = m.getProperty ("source").toString();
+    if (key == "int") source = INTERNAL;
+    else if (key == "file") source = fileBankLoaded ? FILE_BANK : INTERNAL;
+    else source = juce::jmax (0, sourceForHash ((uint64_t) std::strtoull (key.toRawUTF8(), nullptr, 10)));
+    patchNum = juce::jlimit (0, 127, (int) m.getProperty ("patch", 0));
+    manual = (bool) m.getProperty ("manual", false);
+    chorusLevelBit = (uint8_t) ((int) m.getProperty ("chorusLevel", 0x40) & 0x40);
+    publishBank();
+}
+
+escoita::Estado::Opcions BXProcessor::opcionsEstado()
+{
+    escoita::Estado::Opcions o;
+    o.extension = "bxpreset";
+    o.extra = [this] { return memoria(); };
+    o.aplicarExtra = [this] (const juce::ValueTree& m)
+    {
+        setMemoria (m);
+        updateHostDisplay (ChangeDetails().withProgramChanged (true));
+    };
+    return o;
+}
+
+// gárdanse o antes e o despois; «facer» non se repite a primeira vez (o cambio xa está feito), si ao refacer
+void BXProcessor::cambiarMemoria (const juce::String& nome, const std::function<void()>& f)
+{
+    const auto antes = memoria();
+    f();
+    const auto despois = memoria();
+    if (antes.isEquivalentTo (despois)) return;
+    auto primeira = std::make_shared<bool> (true);
+    estado.cambio (nome, [this, despois, primeira] { if (*primeira) *primeira = false; else { setMemoria (despois); updateHostDisplay (ChangeDetails().withProgramChanged (true)); } },
+                         [this, antes] { setMemoria (antes); updateHostDisplay (ChangeDetails().withProgramChanged (true)); });
+}
+
+void BXProcessor::getStateInformation (juce::MemoryBlock& destData)
+{
+    auto st = apvts.copyState();
+    st.removeChild (st.getChildWithName ("Memoria"), nullptr);
+    st.appendChild (memoria(), nullptr);
     st.setProperty ("uiScale", uiScale, nullptr);
     if (auto xml = st.createXml()) copyXmlToBinary (*xml, destData);
 }
@@ -652,40 +722,10 @@ void BXProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (! xml || ! xml->hasTagName (apvts.state.getType())) return;
     auto tree = juce::ValueTree::fromXml (*xml);
     uiScale = juce::jlimit (0.5f, 2.0f, (float) tree.getProperty ("uiScale", 1.0f));
-    auto unb64 = [] (const juce::String& s)
-    {
-        juce::MemoryOutputStream out;
-        if (! juce::Base64::convertFromBase64 (out, s)) return std::vector<uint8_t>();
-        const auto* p = static_cast<const uint8_t*> (out.getData());
-        return std::vector<uint8_t> (p, p + out.getDataSize());
-    };
     const auto m = tree.getChildWithName ("Memoria");
-    if (m.isValid())
-    {
-        const auto in = xuno::sysexToBank (xuno::parseSysex (unb64 (m.getProperty ("internal").toString())));
-        if (in.size() >= 128) for (size_t k = 0; k < 128; ++k) internal[k] = in[k];
-        fileBankLoaded = false;
-        if (m.hasProperty ("file"))
-        {
-            const auto fb = xuno::sysexToBank (xuno::parseSysex (unb64 (m.getProperty ("file").toString())));
-            if (fb.size() >= 2)
-            {
-                for (size_t k = 0; k < 128; ++k) fileBank[k] = k < fb.size() ? fb[k] : xuno::initPatch();
-                fileBankLoaded = true;
-                fileBankName = m.getProperty ("fileName").toString().substring (0, 10);
-            }
-        }
-        const auto key = m.getProperty ("source").toString();
-        if (key == "int") source = INTERNAL;
-        else if (key == "file") source = fileBankLoaded ? FILE_BANK : INTERNAL;
-        else source = juce::jmax (0, sourceForHash ((uint64_t) std::strtoull (key.toRawUTF8(), nullptr, 10)));
-        patchNum = juce::jlimit (0, 127, (int) m.getProperty ("patch", 0));
-        manual = (bool) m.getProperty ("manual", false);
-        chorusLevelBit = (uint8_t) ((int) m.getProperty ("chorusLevel", 0x40) & 0x40);
-    }
+    setMemoria (m);
     tree.removeChild (m, nullptr);
-    apvts.replaceState (tree);   // os parámetros son o panel
-    publishBank();
+    apvts.replaceState (tree);   // os parámetros son o panel (e o desfacer empeza de novo)
     updateHostDisplay (ChangeDetails().withProgramChanged (true));
 }
 

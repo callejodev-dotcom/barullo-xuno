@@ -243,6 +243,18 @@ void Look::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool over, bo
     juce::Colour c = b.getToggleState() || over ? col::crema : col::crema2;
     if (! b.isEnabled()) c = col::crema3.withAlpha (0.6f);
     g.setColour (c);
+    const int curve = b.getProperties()["curve"];   // desfacer (−1) e refacer (+1): unha frecha en arco
+    if (curve != 0)
+    {
+        const auto ctr = r.getCentre(); const float rad = 6.5f;
+        const float a0 = curve > 0 ? -2.4f : 2.4f, a1 = curve > 0 ? 1.2f : -1.2f;
+        juce::Path arc; arc.addCentredArc (ctr.x, ctr.y + 1.0f, rad, rad, 0.0f, a0, a1, true);
+        g.strokePath (arc, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        const juce::Point<float> tip (ctr.x + rad * std::sin (a1), ctr.y + 1.0f - rad * std::cos (a1));
+        juce::Path head; head.addTriangle (tip.x + (float) curve * 4.0f, tip.y, tip.x - (float) curve * 1.5f, tip.y - 4.0f, tip.x - (float) curve * 1.5f, tip.y + 4.0f);
+        g.fillPath (head);
+        return;
+    }
     g.setFont (caps ((float) b.getProperties().getWithDefault ("fontSize", 9.5f), 0.15f));
     g.drawFittedText (upper (b.getButtonText()), r.toNearestInt().reduced (3, 0), juce::Justification::centred, 1, 0.7f);
 }
@@ -776,7 +788,8 @@ void Chart::mouseDown (const juce::MouseEvent& e)
 {
     const int h = cellAt (e.getPosition());
     if (h < 0) return;
-    proc.selectPatch (group * 64 + h);
+    proc.estado.novoPaso();   // aquí o son cambia ao premer, antes do paso que empeza a xanela
+    proc.cambiarMemoria ("son", [&] { proc.selectPatch (group * 64 + h); });
     refresh();
 }
 
@@ -868,14 +881,28 @@ MainView::MainView (BXProcessor& p)
     // ---- cabeceira
     bankBtn.getProperties().set ("gold", true);
     bankBtn.onClick = [this] { chooseBank(); };
-    key (bankBtn, U ("O banco: a memoria, os sons propios, os .syx da carpeta…"));
+    key (bankBtn, U ("O banco: a memoria, os sons propios, os .syx da carpeta… Aquí tamén abrir e gardar .syx de Juno-106."));
     chartBtn.onClick = [this] { showChart (! chart.isVisible()); };
     key (chartBtn, U ("A táboa cos nomes dos 64 sons de cada grupo."));
-    openBtn.onClick = [this] { openSyx(); };
-    key (openBtn, U ("Abrir un .syx de Juno-106 (un son ou un banco enteiro)."));
-    saveBtn.onClick = [this] { saveMenu(); };
-    key (saveBtn, U ("Gardar o banco ou o son do panel como .syx de Juno-106."));
-    for (auto* b : { &openBtn, &saveBtn }) b->getProperties().set ("noLed", true);
+
+    // presets propios, A/B e desfacer (do núcleo común)
+    presetsBtn.onClick = [this] { showPresetsMenu(); };
+    presetsBtn.getProperties().set ("noLed", true);
+    key (presetsBtn, U ("Os teus presets: gardan todo (o panel, a memoria, o banco escollido e a función). Aquí tamén: abrir a carpeta e copiar entre A e B."));
+    for (int i = 0; i < 2; ++i)
+    {
+        abBtn[i].setButtonText (i == 0 ? "A" : "B");
+        abBtn[i].onClick = [this, i] { if (i != proc.estado.lado()) proc.estado.cambiarLado(); refreshState(); refreshKeys(); };
+        key (abBtn[i], U ("A/B: dous xogos de axustes para comparar (o panel, a memoria e a función). Cambiar de lado garda o actual; para copiar un lado no outro, no menú dos presets."));
+    }
+    undoBtn.getProperties().set ("curve", -1); redoBtn.getProperties().set ("curve", 1);
+    for (auto* b : { &undoBtn, &redoBtn }) b->getProperties().set ("noLed", true);
+    undoBtn.setTitle (U ("Desfacer")); redoBtn.setTitle (U ("Refacer"));
+    undoBtn.onClick = [this] { proc.undo.undo(); refreshState(); refreshKeys(); };
+    redoBtn.onClick = [this] { proc.undo.redo(); refreshState(); refreshKeys(); };
+    key (undoBtn, U ("Desfacer o último cambio (do panel, da memoria ou da función). Cada clic é un paso."));
+    key (redoBtn, U ("Refacer."));
+    juce::Desktop::getInstance().addGlobalMouseListener (this);
     bind ("poly", polyAtt, [this] (int v) { poly1.setToggleState (v == 0, juce::dontSendNotification); poly2.setToggleState (v == 1, juce::dontSendNotification); unison.setToggleState (v == 2, juce::dontSendNotification); });
     poly1.onClick = [this, set] { set (polyAtt, 0); showParam (U ("Asignación"), "Poly 1"); };
     poly2.onClick = [this, set] { set (polyAtt, 1); showParam (U ("Asignación"), "Poly 2"); };
@@ -906,7 +933,7 @@ MainView::MainView (BXProcessor& p)
         n->onClick = [this, i] { pressPatch (i); };
         key (*n, U ("Número ") + juce::String (i + 1) + U (". Con WRITE aceso, garda aquí o panel."));
     }
-    manualBtn.onClick = [this] { proc.setManual(); showMessage (U ("Manual: o son é o que marca o panel, sen memoria.")); };
+    manualBtn.onClick = [this] { proc.cambiarMemoria ("manual", [this] { proc.setManual(); }); showMessage (U ("Manual: o son é o que marca o panel, sen memoria.")); };
     key (manualBtn, U ("MANUAL: o son é o do panel, sen ningunha memoria."));
     writeBtn.onClick = [this]
     {
@@ -975,7 +1002,31 @@ MainView::MainView (BXProcessor& p)
     timerCallback();
 }
 
-MainView::~MainView() { stopTimer(); setLookAndFeel (nullptr); }
+MainView::~MainView()
+{
+    juce::Desktop::getInstance().removeGlobalMouseListener (this);
+    stopTimer();
+    setLookAndFeel (nullptr);
+}
+
+// cada clic (en calquera parte) empeza un paso novo de desfacer
+void MainView::mouseDown (const juce::MouseEvent&) { proc.estado.novoPaso(); }
+
+void MainView::showPresetsMenu()
+{
+    juce::PopupMenu m;
+    m.addSectionHeader (U ("Presets propios"));
+    proc.estado.engadirAoMenu (m, [sp = juce::Component::SafePointer<MainView> (this)] { if (sp != nullptr) { sp->refreshState(); sp->refreshKeys(); } });
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&presetsBtn));
+}
+
+void MainView::refreshState()
+{
+    for (int i = 0; i < 2; ++i)
+        if (abBtn[i].getToggleState() != (i == proc.estado.lado())) abBtn[i].setToggleState (i == proc.estado.lado(), juce::dontSendNotification);
+    if (undoBtn.isEnabled() != proc.undo.canUndo()) undoBtn.setEnabled (proc.undo.canUndo());
+    if (redoBtn.isEnabled() != proc.undo.canRedo()) redoBtn.setEnabled (proc.undo.canRedo());
+}
 
 void MainView::showChart (bool s)
 {
@@ -1000,12 +1051,23 @@ void MainView::refreshKeys()
     bankBtn.setButtonText (U ("Banco: ") + proc.sourceName (proc.getSource()));
 }
 
+// un número da memoria: con WRITE aceso gárdase alí o panel; se non, o panel vai a ese son
+void MainView::pressSlot (int to)
+{
+    if (writeArmed)
+    {
+        proc.cambiarMemoria ("write", [&] { proc.writeTo (to); });
+        writeArmed = false;
+        showMessage (U ("Gardado en ") + BXProcessor::patchLabel (to) + U (" (memoria)."));
+    }
+    else proc.cambiarMemoria ("son", [&] { proc.selectPatch (to); });
+}
+
 void MainView::pressGroup (int group)
 {
     const int n = proc.getPatchNum();
     const int to = group * 64 + n % 64;
-    if (writeArmed) { proc.writeTo (to); writeArmed = false; showMessage (U ("Gardado en ") + BXProcessor::patchLabel (to) + U (" (memoria).")); }
-    else proc.selectPatch (to);
+    pressSlot (to);
     refreshKeys();
 }
 
@@ -1013,16 +1075,14 @@ void MainView::pressBank (int bank)
 {
     const int n = proc.getPatchNum();
     const int to = (n / 64) * 64 + bank * 8 + n % 8;
-    if (writeArmed) { proc.writeTo (to); writeArmed = false; showMessage (U ("Gardado en ") + BXProcessor::patchLabel (to) + U (" (memoria).")); }
-    else proc.selectPatch (to);
+    pressSlot (to);
     refreshKeys();
 }
 
 void MainView::pressPatch (int number)
 {
     const int to = (proc.getPatchNum() / 8) * 8 + number;
-    if (writeArmed) { proc.writeTo (to); writeArmed = false; showMessage (U ("Gardado en ") + BXProcessor::patchLabel (to) + U (" (memoria).")); }
-    else proc.selectPatch (to);
+    pressSlot (to);
     refreshKeys();
 }
 
@@ -1037,16 +1097,24 @@ void MainView::chooseBank()
     m.addItem (2, (proc.hasFileBank() ? proc.sourceName (BXProcessor::FILE_BANK) : juce::String ("FICHEIRO")) + U (" — o último .syx aberto"), proc.hasFileBank(), cur == BXProcessor::FILE_BANK);
     m.addSeparator();
     m.addItem (3, U ("Copiar este banco á memoria"), cur != BXProcessor::INTERNAL);
+    m.addSectionHeader (U ("Ficheiros .syx de Juno-106"));
+    m.addItem (6, U ("Abrir un .syx (un son ou un banco enteiro)…"));
+    m.addItem (7, U ("Gardar este banco (") + proc.sourceName (cur) + U (", 128 sons)…"));
+    m.addItem (8, U ("Gardar o son do panel…"));
+    m.addSeparator();
     m.addItem (4, U ("Carpeta de bancos .syx…"));
     if (proc.getBankFolder().isDirectory()) m.addItem (5, U ("Volver ler a carpeta (") + proc.getBankFolder().getFileName() + ")");
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&bankBtn), [this] (int r)
     {
-        if (r == 1) proc.selectSource (BXProcessor::INTERNAL);
-        else if (r == 2) proc.selectSource (BXProcessor::FILE_BANK);
-        else if (r == 3) { proc.copySourceToInternal(); showMessage (U ("Banco copiado na memoria.")); }
+        auto source = [this] (int src) { proc.cambiarMemoria ("banco", [this, src] { proc.selectSource (src); }); };
+        if (r == 1) source (BXProcessor::INTERNAL);
+        else if (r == 2) source (BXProcessor::FILE_BANK);
+        else if (r == 3) { proc.cambiarMemoria (U ("copiar á memoria"), [this] { proc.copySourceToInternal(); }); showMessage (U ("Banco copiado na memoria.")); }
         else if (r == 4) chooseFolder();
         else if (r == 5) { proc.rescanBankFolder(); showMessage (juce::String (proc.numFolderBanks()) + U (" bancos na carpeta.")); }
-        else if (r >= 100) proc.selectSource (r - 100);
+        else if (r == 6) openSyx();
+        else if (r == 7 || r == 8) saveSyx (r == 7);
+        else if (r >= 100) source (r - 100);
         chart.refresh();
         refreshKeys();
     });
@@ -1073,33 +1141,26 @@ void MainView::openSyx()
         const auto f = fc.getResult();
         if (! f.existsAsFile()) return;
         juce::String msg;
-        proc.loadSyxFile (f, msg);
+        proc.estado.novoPaso();
+        proc.cambiarMemoria ("abrir .syx", [&] { proc.loadSyxFile (f, msg); });
         showMessage (msg);
         chart.refresh();
         refreshKeys();
     });
 }
 
-void MainView::saveMenu()
+void MainView::saveSyx (bool bank)
 {
-    juce::PopupMenu m;
-    m.addItem (1, U ("Gardar o banco (") + proc.sourceName (proc.getSource()) + U (", 128 sons)…"));
-    m.addItem (2, U ("Gardar o son do panel…"));
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&saveBtn), [this] (int r)
+    const auto name = bank ? proc.sourceName (proc.getSource()).toLowerCase() : BXProcessor::patchLabel (proc.getPatchNum());
+    chooser = std::make_unique<juce::FileChooser> (bank ? U ("Gardar o banco") : U ("Gardar o son"),
+                                                   proc.getBankFolder().getChildFile (name + ".syx"), "*.syx");
+    chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [this, bank] (const juce::FileChooser& fc)
     {
-        if (r <= 0) return;
-        const bool bank = r == 1;
-        const auto name = bank ? proc.sourceName (proc.getSource()).toLowerCase() : BXProcessor::patchLabel (proc.getPatchNum());
-        chooser = std::make_unique<juce::FileChooser> (bank ? U ("Gardar o banco") : U ("Gardar o son"),
-                                                       proc.getBankFolder().getChildFile (name + ".syx"), "*.syx");
-        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting, [this, bank] (const juce::FileChooser& fc)
-        {
-            auto f = fc.getResult();
-            if (f == juce::File()) return;
-            if (! f.hasFileExtension ("syx")) f = f.withFileExtension ("syx");
-            const bool ok = bank ? proc.saveBankFile (f, proc.getSource()) : proc.savePatchFile (f);
-            showMessage (ok ? U ("Gardado: ") + f.getFileName() : U ("Non se puido gardar."));
-        });
+        auto f = fc.getResult();
+        if (f == juce::File()) return;
+        if (! f.hasFileExtension ("syx")) f = f.withFileExtension ("syx");
+        const bool ok = bank ? proc.saveBankFile (f, proc.getSource()) : proc.savePatchFile (f);
+        showMessage (ok ? U ("Gardado: ") + f.getFileName() : U ("Non se puido gardar."));
     });
 }
 
@@ -1156,6 +1217,7 @@ void MainView::timerCallback()
         screens.repaint();
     }
     refreshKeys();
+    refreshState();
     screens.tick();
     if (++slowTick % 6 == 0) screens.repaint (screens.mainBox.toNearestInt());   // o «editado» e os nomes
     if (slowTick % 3 == 0) screens.repaint (screens.waveBox.toNearestInt());
@@ -1202,7 +1264,8 @@ void MainView::paint (juce::Graphics& g)
         g.setColour (col::crema2); g.drawText (U (" · FERRAMENTAS"), sub.withTrimmedLeft (we + 4.0f), juce::Justification::centredLeft, false);
     }
     auto well = [&] (juce::Component& a, juce::Component& b) { paintWell (g, a.getBounds().getUnion (b.getBounds()).expanded (4).toFloat(), 11.0f); };
-    well (chartBtn, saveBtn);
+    well (chartBtn, chartBtn);
+    well (presetsBtn, redoBtn);
     well (poly1, unison);
 
     // o panel dos mandos
@@ -1284,12 +1347,17 @@ void MainView::resized()
     {
         int x = headerArea.getX() + 210;
         const int y = headerArea.getY() + 10, h = 32;
-        bankBtn.setBounds (x, y, 230, h); x += 246;
-        chartBtn.setBounds (x, y, 86, h); openBtn.setBounds (x + 90, y, 78, h); saveBtn.setBounds (x + 172, y, 78, h);
+        bankBtn.setBounds (x, y, 214, h); x += 226;
+        chartBtn.setBounds (x, y, 74, h); x += 88;
+        presetsBtn.setBounds (x, y, 80, h); x += 84;
+        abBtn[0].setBounds (x, y, 38, h); x += 42;
+        abBtn[1].setBounds (x, y, 38, h); x += 46;
+        undoBtn.setBounds (x, y, 34, h); x += 38;
+        redoBtn.setBounds (x, y, 34, h);
         int r = headerArea.getRight() - 10;
-        funcBtn.setBounds (r - 104, y, 104, h); r -= 116;
-        transpBtn.setBounds (r - 122, y, 122, h); r -= 140;
-        unison.setBounds (r - 96, y, 96, h); poly2.setBounds (r - 184, y, 84, h); poly1.setBounds (r - 272, y, 84, h);
+        funcBtn.setBounds (r - 92, y, 92, h); r -= 102;
+        transpBtn.setBounds (r - 108, y, 108, h); r -= 122;
+        unison.setBounds (r - 88, y, 88, h); poly2.setBounds (r - 168, y, 76, h); poly1.setBounds (r - 248, y, 76, h);
     }
 
     screens.setBounds (screensArea);

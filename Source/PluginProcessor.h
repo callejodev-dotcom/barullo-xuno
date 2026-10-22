@@ -41,7 +41,11 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+    juce::UndoManager undo;   // desfacer e refacer (declárase antes ca o apvts)
     juce::AudioProcessorValueTreeState apvts;
+    // presets propios (.bxpreset en Documentos/Barullo Xuno/Presets), A/B e desfacer, do núcleo
+    // común: os parámetros (o panel e a función) e mais a memoria (a fonte, o son, a memoria e o .syx aberto)
+    escoita::Estado estado { apvts, &undo, opcionsEstado() };
     juce::MidiKeyboardState keyboardState;
 
     // identificadores dos 16 deslizadores (na orde do SysEx)
@@ -74,6 +78,9 @@ public:
     void writeTo (int slot);                      // WRITE: garda o panel na memoria
     void copySourceToInternal();
     void initPanel();
+
+    // un cambio da memoria desde a interface, que se pode desfacer: «f» fai o cambio cos métodos de enriba
+    void cambiarMemoria (const juce::String& nome, const std::function<void()>& f);
 
     bool loadSyxFile (const juce::File&, juce::String& message);
     bool saveBankFile (const juce::File&, int src) const;
@@ -119,6 +126,11 @@ private:
     int source = 0, patchNum = 0;
     bool manual = false;
     std::atomic<int> chorusLevelBit { 0x40 };   // co chorus apagado lémbrase se era I ou II (lese no fío de audio)
+
+    // a memoria enteira nun ValueTree (o «Memoria» do estado do proxecto) e volta; o panel non se move
+    juce::ValueTree memoria() const;
+    void setMemoria (const juce::ValueTree&);
+    escoita::Estado::Opcions opcionsEstado();
 
     std::array<xuno::Patch, 128>& bankOf (int src);
     const std::array<xuno::Patch, 128>& bankOf (int src) const;
@@ -167,6 +179,7 @@ private:
     void applyPerformance();
 
     double sr = 48000, volS = 1;
+    escoita::Teito teito;   // limitador de seguridade a −1 dBFS, do núcleo
     std::vector<float> right;
 
     void handleMidi (const juce::MidiMessage&);

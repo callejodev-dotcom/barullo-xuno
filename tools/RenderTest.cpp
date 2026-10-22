@@ -1,5 +1,6 @@
 // Proba sen interface: os 128 sons propios, independencia do tamaño de bloque, SysEx recibido polo
-// MIDI, gardar/recuperar o estado, os modos de asignación e capturas da interface.
+// MIDI, gardar/recuperar o estado, os modos de asignación, A/B, presets e desfacer (do núcleo), o
+// limitador e capturas da interface.
 //   BXRenderTest [saida.wav]                proba enteira (devolve o número de fallos)
 //   BXRenderTest --snapshot saida.png [táboa]
 //   BXRenderTest --niveis saida.txt         sonoridade de cada son (para tools/banco.py)
@@ -10,6 +11,7 @@
 #include "PluginEditor.h"
 #include "Banco.h"
 #include <cstdio>
+#include <cstring>
 
 static void writeWav (const juce::File& f, const juce::AudioBuffer<float>& b, double sr)
 {
@@ -81,6 +83,27 @@ static std::vector<Ev> tour (int first, int count, double per, bool modulate = t
     }
     return seq;
 }
+
+// a pegada dun son: FNV-1a de 64 bits das mostras (un cambio de organización non pode movela nin un bit)
+static uint64_t pegada (const juce::AudioBuffer<float>& b)
+{
+    uint64_t h = 1469598103934665603ull;
+    for (int c = 0; c < b.getNumChannels(); ++c)
+        for (int i = 0; i < b.getNumSamples(); ++i)
+        {
+            const float x = b.getSample (c, i);
+            uint32_t u; std::memcpy (&u, &x, 4);
+            for (int k = 0; k < 4; ++k) { h ^= (u >> (8 * k)) & 0xFF; h *= 1099511628211ull; }
+        }
+    return h;
+}
+
+static void setParam (BXProcessor& p, const char* id, float v)
+{
+    if (auto* prm = p.apvts.getParameter (id)) prm->setValueNotifyingHost (prm->convertTo0to1 (v));
+}
+
+static float getParam (BXProcessor& p, const char* id) { return p.apvts.getRawParameterValue (id)->load(); }
 
 static void snapshot (const juce::File& png, bool chart)
 {
@@ -297,7 +320,73 @@ int main (int argc, char** argv)
         for (int c = 0; c < 2; ++c) for (int i = 0; i < x.getNumSamples(); ++i) d = juce::jmax (d, std::abs (x.getSample (c, i) - y.getSample (c, i)));
         const double secs = x.getNumSamples() / sr;
         check (d < 1.0e-6f, "bloques de 512 e de 37 mostras: iguais", juce::String::formatted ("(diferenza %g; %.2f s de CPU para %.1f s, %.0fx)", d, c1, secs, secs / c1));
+        std::printf ("pegada da saída: %016llx\n", (unsigned long long) pegada (x));
         if (argc > 1 && ! mode.startsWith ("--")) writeWav (juce::File (mode), x, sr);
+    }
+    {   // A/B (do núcleo): cada lado co seu panel, a súa memoria e a súa función
+        BXProcessor p;
+        p.selectSource (0); p.selectPatch (5); setParam (p, "envA", 55);
+        const auto panelA = p.panelPatch();
+        const auto mem100 = p.patchAt (BXProcessor::INTERNAL, 100);
+        p.estado.cambiarLado();                                   // B: copia de A
+        bool ok = p.estado.lado() == 1 && p.getPatchNum() == 5 && p.panelPatch() == panelA;
+        p.selectPatch (20); p.writeTo (100); setParam (p, "volume", -6.0f); setParam (p, "voices12", 1.0f);
+        const auto panelB = p.panelPatch();
+        p.estado.cambiarLado();                                   // volve a A
+        ok = ok && p.estado.lado() == 0 && p.getSource() == 0 && p.getPatchNum() == 5 && p.panelPatch() == panelA
+                && p.patchAt (BXProcessor::INTERNAL, 100) == mem100 && std::abs (getParam (p, "volume")) < 0.01f && getParam (p, "voices12") < 0.5f;
+        p.estado.cambiarLado();                                   // B outra vez
+        ok = ok && p.estado.lado() == 1 && p.getSource() == BXProcessor::INTERNAL && p.getPatchNum() == 100 && p.panelPatch() == panelB
+                && p.patchAt (BXProcessor::INTERNAL, 100) == panelB && std::abs (getParam (p, "volume") + 6.0f) < 0.01f && getParam (p, "voices12") > 0.5f;
+        check (ok, "A/B (panel, memoria e función)");
+    }
+    {   // presets propios (do núcleo): gárdano todo e cárgano igual
+        BXProcessor p;
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("barulloxuno_presets_proba");
+        dir.deleteRecursively();
+        p.estado.setCarpeta (dir);
+        p.selectSource (0); p.selectPatch (33); setParam (p, "vcfFreq", 20); p.writeTo (2); setParam (p, "envR", 99); setParam (p, "volume", -3.0f);
+        const auto panel = p.panelPatch(); const auto mem2 = p.patchAt (BXProcessor::INTERNAL, 2);
+        const bool saved = p.estado.gardar ("Proba: Xuno/1");
+        p.selectSource (0); p.selectPatch (0); p.initPanel(); setParam (p, "volume", 0.0f);
+        const auto list = p.estado.presets();
+        const bool loaded = list.size() == 1 && list[0].hasFileExtension ("bxpreset") && p.estado.cargar (list[0]);
+        const bool same = p.getSource() == BXProcessor::INTERNAL && p.getPatchNum() == 2 && p.panelPatch() == panel && p.isEdited()
+                          && p.patchAt (BXProcessor::INTERNAL, 2) == mem2 && std::abs (getParam (p, "volume") + 3.0f) < 0.01f;
+        check (saved && loaded && same, "presets propios: gardar e cargar", list.isEmpty() ? juce::String() : "(" + list[0].getFileName() + ")");
+        dir.deleteRecursively();
+    }
+    {   // desfacer e refacer: un deslizador, escoller un son e WRITE, cada un no seu paso
+        BXProcessor p;
+        p.selectSource (0); p.selectPatch (0);
+        p.apvts.copyState(); p.undo.clearUndoHistory();
+        const auto start = p.panelPatch(); const auto mem77 = p.patchAt (BXProcessor::INTERNAL, 77);
+        p.estado.novoPaso(); setParam (p, "vcfRes", 99); p.apvts.copyState();
+        const auto edited = p.panelPatch();
+        p.estado.novoPaso(); p.cambiarMemoria ("son", [&] { p.selectPatch (9); }); p.apvts.copyState();
+        const auto nine = p.panelPatch();
+        p.estado.novoPaso(); p.cambiarMemoria ("write", [&] { p.writeTo (77); }); p.apvts.copyState();
+        p.estado.novoPaso();
+        const bool after = p.getSource() == BXProcessor::INTERNAL && p.getPatchNum() == 77 && p.patchAt (BXProcessor::INTERNAL, 77) == nine;
+        p.undo.undo();
+        const bool u1 = p.getSource() == 0 && p.getPatchNum() == 9 && p.patchAt (BXProcessor::INTERNAL, 77) == mem77 && p.panelPatch() == nine;
+        p.undo.undo();
+        const bool u2 = p.getPatchNum() == 0 && p.panelPatch() == edited;
+        p.undo.undo();
+        const bool u3 = p.panelPatch() == start && ! p.isEdited();
+        p.undo.redo(); p.undo.redo(); p.undo.redo();
+        const bool r = p.getSource() == BXProcessor::INTERNAL && p.getPatchNum() == 77 && p.patchAt (BXProcessor::INTERNAL, 77) == nine && p.panelPatch() == nine;
+        check (after && u1 && u2 && u3 && r, "desfacer e refacer (deslizador, son e WRITE)");
+    }
+    {   // o limitador do núcleo: o son máis forte, un acorde e o volume a +6 dB non pasan de −1 dBFS
+        BXProcessor p;
+        p.selectSource (0);
+        setParam (p, "volume", 6.0f);
+        std::vector<Ev> seq { { 0.0, 2, 35, 0 } };
+        for (int n : { 36, 43, 48, 52, 55, 60 }) seq.push_back ({ 0.05, 0, n, 127 });
+        auto o = play (p, seq, 1.5, 512, sr);
+        const float pk = juce::jmax (o.getMagnitude (0, 0, o.getNumSamples()), o.getMagnitude (1, 0, o.getNumSamples()));
+        check (pk <= 0.8913f, "teito a -1 dBFS", juce::String::formatted ("(pico %.4f)", pk));
     }
     {   // os 128 sons: nada de NaN e os niveis
         BXProcessor p;
