@@ -193,6 +193,23 @@ int main (int argc, char** argv)
         fails += ok ? 0 : 1;
     };
 
+    {   // ao abrir, cada parámetro está no seu valor de partida (o panel é A11, que é de onde saen)
+        BXProcessor p;
+        juce::String bad;
+        for (auto* prm : p.getParameters())
+            if (std::abs (prm->getValue() - prm->getDefaultValue()) > 1.0e-6f) bad << prm->getName (40) << " ";
+        check (bad.isEmpty(), "parámetros nos seus valores de partida", bad);
+        // e o texto das eleccións volve ao mesmo valor, tamén se chega byte a byte (coma desde CLAP)
+        juce::String badText;
+        for (auto* prm : p.getParameters())
+        {
+            const auto t = prm->getText (1.0f, 64);
+            juce::String asBytes;
+            for (const char* c = t.toRawUTF8(); *c != 0; ++c) asBytes += juce::String::charToString ((juce::juce_wchar) (uint8_t) *c);
+            if (std::abs (prm->getValueForText (asBytes) - 1.0f) > 1.0e-3f && prm->getNumSteps() <= 4) badText << prm->getName (40) << " ";
+        }
+        check (badText.isEmpty(), "texto das eleccións ida e volta", badText);
+    }
     {   // SysEx: un son ($30) e un parámetro ($32), coma os manda un Juno-106
         BXProcessor p;
         p.prepareToPlay (sr, 512);

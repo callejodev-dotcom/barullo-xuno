@@ -74,6 +74,24 @@ BXProcessor::BXProcessor()
 
 BXProcessor::~BXProcessor() { stopTimer(); }
 
+// unha elección co seu texto lido con coidado: o envoltorio de CLAP pasa o texto do DAW como char*
+// e JUCE leo coma se fose ASCII, así que «Unísono» ou «−» chegan byte a byte; recompóñense en UTF-8
+static std::unique_ptr<juce::AudioParameterChoice> choice (const char* id, const juce::String& name, const juce::StringArray& options, int def)
+{
+    auto fromText = [options] (const juce::String& t)
+    {
+        std::string bytes;
+        bool narrow = true;
+        for (auto c : t) { if (c > 0xff) { narrow = false; break; } bytes.push_back ((char) c); }
+        const auto fixed = (narrow ? escoita::textoDeBytes (bytes.data(), bytes.size()) : t).trim();
+        for (int i = 0; i < options.size(); ++i)
+            if (options[i].equalsIgnoreCase (fixed) || options[i].equalsIgnoreCase (t.trim())) return i;
+        return juce::jlimit (0, options.size() - 1, fixed.getIntValue());
+    };
+    return std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id, 1 }, name, options, def,
+                                                         juce::AudioParameterChoiceAttributes().withValueFromStringFunction (fromText));
+}
+
 juce::AudioProcessorValueTreeState::ParameterLayout BXProcessor::createLayout()
 {
     using namespace juce;
@@ -84,32 +102,35 @@ juce::AudioProcessorValueTreeState::ParameterLayout BXProcessor::createLayout()
     static const char* names[16] = { "LFO: velocidade", "LFO: atraso", "DCO: LFO", "DCO: PWM", "DCO: ruído", "VCF: frecuencia",
         "VCF: resonancia", "VCF: envolvente", "VCF: LFO", "VCF: teclado", "VCA: nivel", "ENV: ataque", "ENV: caída",
         "ENV: sustain", "ENV: relaxación", "DCO: sub" };
-    const xuno::Patch init = xuno::initPatch();
+    // os valores de partida son os do primeiro son (A11), o que ten o panel ao abrir
+    xuno::Patch init {};
+    for (int b = 0; b < xuno::PATCH_SIZE; ++b) init[(size_t) b] = xuno::bank::PATCHES[0].p[b];
+    xuno::normalize (init);
     for (int i = 0; i < 16; ++i)
         l.add (std::make_unique<AudioParameterInt> (ParameterID { sliderIds[i], 1 }, U (names[i]), 0, 127, init[(size_t) i]));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "range", 1 }, U ("DCO: rexistro"), StringArray { "16'", "8'", "4'" }, 1));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "pulse", 1 }, U ("DCO: pulso"), onOff, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "saw", 1 }, U ("DCO: serra"), onOff, 1));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chorus", 1 }, U ("Chorus"), StringArray { "Apagado", "I", "II" }, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "pwmMode", 1 }, U ("DCO: PWM con"), StringArray { "LFO", "Manual" }, 1));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "envPol", 1 }, U ("VCF: polaridade da envolvente"), StringArray { "+", U ("−") }, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "vcaMode", 1 }, U ("VCA: modo"), StringArray { "Envolvente", "Porta" }, 0));
-    l.add (std::make_unique<AudioParameterInt> (ParameterID { "hpf", 1 }, U ("HPF"), 0, 3, 1));
+    l.add (choice ("range", U ("DCO: rexistro"), StringArray { "16'", "8'", "4'" }, xuno::rangeOf (init)));
+    l.add (choice ("pulse", U ("DCO: pulso"), onOff, (init[xuno::SW1] & 0x08) ? 1 : 0));
+    l.add (choice ("saw", U ("DCO: serra"), onOff, (init[xuno::SW1] & 0x10) ? 1 : 0));
+    l.add (choice ("chorus", U ("Chorus"), StringArray { "Apagado", "I", "II" }, xuno::chorusOn (init) ? (xuno::chorusII (init) ? 2 : 1) : 0));
+    l.add (choice ("pwmMode", U ("DCO: PWM con"), StringArray { "LFO", "Manual" }, init[xuno::SW2] & 1));
+    l.add (choice ("envPol", U ("VCF: polaridade da envolvente"), StringArray { "+", U ("−") }, (init[xuno::SW2] >> 1) & 1));
+    l.add (choice ("vcaMode", U ("VCA: modo"), StringArray { "Envolvente", "Porta" }, (init[xuno::SW2] >> 2) & 1));
+    l.add (std::make_unique<AudioParameterInt> (ParameterID { "hpf", 1 }, U ("HPF"), 0, 3, xuno::hpfOf (init)));
 
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "volume", 1 }, "Volume",
         NormalisableRange<float> (-30.0f, 6.0f, 0.1f), 0.0f, AudioParameterFloatAttributes().withLabel ("dB")));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "tune", 1 }, U ("Afinación"), -128, 127, -8));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "porta", 1 }, U ("Portamento"), 0, 255, 90));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "portaOn", 1 }, U ("Portamento aceso"), onOff, 0));
+    l.add (choice ("portaOn", U ("Portamento aceso"), onOff, 0));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "bendDco", 1 }, U ("Bender: DCO"), 0, 255, 43));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "bendVcf", 1 }, U ("Bender: VCF"), 0, 255, 0));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "lfoMod", 1 }, U ("Bender: LFO"), 0, 255, 110));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "poly", 1 }, U ("Asignación"), StringArray { "Poly 1", "Poly 2", U ("Unísono") }, 0));
+    l.add (choice ("poly", U ("Asignación"), StringArray { "Poly 1", "Poly 2", U ("Unísono") }, 0));
     l.add (std::make_unique<AudioParameterInt> (ParameterID { "transpose", 1 }, U ("Transposición"), -12, 12, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "instant", 1 }, U ("Notas ao instante"), onOff, 1));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "variance", 1 }, U ("Voces con tolerancias"), onOff, 1));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "analogNoise", 1 }, U ("Ruído do chorus"), onOff, 1));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "voices12", 1 }, U ("Doce voces"), onOff, 0));
+    l.add (choice ("instant", U ("Notas ao instante"), onOff, 1));
+    l.add (choice ("variance", U ("Voces con tolerancias"), onOff, 1));
+    l.add (choice ("analogNoise", U ("Ruído do chorus"), onOff, 1));
+    l.add (choice ("voices12", U ("Doce voces"), onOff, 0));
     return l;
 }
 

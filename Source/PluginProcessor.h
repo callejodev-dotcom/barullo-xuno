@@ -118,7 +118,7 @@ private:
     bool fileBankLoaded = false;
     int source = 0, patchNum = 0;
     bool manual = false;
-    uint8_t chorusLevelBit = 0x40;     // co chorus apagado lémbrase se era I ou II
+    std::atomic<int> chorusLevelBit { 0x40 };   // co chorus apagado lémbrase se era I ou II (lese no fío de audio)
 
     std::array<xuno::Patch, 128>& bankOf (int src);
     const std::array<xuno::Patch, 128>& bankOf (int src) const;
