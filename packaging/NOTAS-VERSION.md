@@ -2,6 +2,11 @@
 
 Unha ferramenta de [Escoita](https://www.escoita.link).
 
+## Novidades na 0.1.1
+
+- **Limitador de seguridade novo**: mira 1,5 ms por diante e baixa suave antes do pico, en vez de achatalo. Aínda que o son vaia moi forte, xa non soa a clip. O DAW compensa só eses 1,5 ms (a latencia que declara o plugin).
+- Tocando en directo, son 1,5 ms máis (non se nota).
+
 ## Novidades na 0.1.0
 
 - A primeira versión: o panel enteiro (LFO, DCO, HPF, VCF, VCA, ENV e chorus), 128 sons propios (A, clásicos; B, Escoita), memoria de 128 que se pode gravar, carpeta de bancos .syx (os sons de fábrica recoñécense e amósanse co seu nome), POLY 1, POLY 2 e unísono, portamento, transposición, bender e MIDI con SysEx de Roland.
