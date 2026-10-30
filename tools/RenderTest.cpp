@@ -427,7 +427,8 @@ int main (int argc, char** argv)
         for (int n : { 36, 43, 48, 52, 55, 60 }) seq.push_back ({ 0.05, 0, n, 127 });
         auto o = play (p, seq, 1.5, 512, sr);
         const float pk = juce::jmax (o.getMagnitude (0, 0, o.getNumSamples()), o.getMagnitude (1, 0, o.getNumSamples()));
-        check (pk <= 0.8913f, "teito a -1 dBFS", juce::String::formatted ("(pico %.4f)", pk));
+        check (pk <= 0.8913f && p.getLatencySamples() == 72, "teito a -1 dBFS, con 1,5 ms de anticipación",
+               juce::String::formatted ("(pico %.4f; latencia %d)", pk, p.getLatencySamples()));
     }
     {   // os 128 sons: nada de NaN e os niveis
         BXProcessor p;

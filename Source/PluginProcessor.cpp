@@ -546,7 +546,6 @@ void BXProcessor::applyPerformance()
 void BXProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     sr = sampleRate;
-    setLatencySamples (0);
     applyPerformance();
     synth.prepare (sampleRate);
     lastParamPatch = patchFromParams();
@@ -557,7 +556,8 @@ void BXProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
         audioBank = sharedBank; audioPlay = sharedPlay; bankDirty = false;
     }
     volS = juce::Decibels::decibelsToGain ((double) volumeParam->load());
-    teito.preparar (sampleRate, 0.080, 0.891);
+    teito.preparar (sampleRate, 0.080, 0.891, 0.0015);
+    setLatencySamples (teito.latencia());   // o Juno non ten latencia; só o teito mira 1,5 ms por diante
     right.assign ((size_t) juce::jmax (1, samplesPerBlock), 0.0f);
     keyboardState.reset();
 }
@@ -648,8 +648,8 @@ void BXProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuff
     if (pos < n) synth.render (L + pos, R + pos, n - pos);
     if (anyMidi) midiActivity.fetch_add (1);
 
-    // volume (suavizado) e o limitador de seguridade do núcleo: teito a −1 dBFS, ataque
-    // instantáneo, solta en 80 ms e sen anticipación (non engade latencia)
+    // volume (suavizado) e o limitador de seguridade do núcleo: teito a −1 dBFS, con 1,5 ms de
+    // anticipación (baixa suave antes do pico, sen distorsión; o DAW compensa a latencia) e solta en 80 ms
     const double volT = juce::Decibels::decibelsToGain ((double) volumeParam->load());
     const double sm = 1.0 - std::exp (-1.0 / (0.02 * sr));
     const bool stereo = buffer.getNumChannels() > 1;

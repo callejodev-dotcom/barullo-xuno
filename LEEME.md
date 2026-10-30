@@ -1,4 +1,4 @@
-**Barullo Xuno** é un sintetizador analóxico de seis voces con DCO, compatible cos sons do Juno-106: le e garda os seus ficheiros .syx e recibe os sons e os cambios de parámetro que manda o teclado polo MIDI. Sen mostras e sen latencia.
+**Barullo Xuno** é un sintetizador analóxico de seis voces con DCO, compatible cos sons do Juno-106: le e garda os seus ficheiros .syx e recibe os sons e os cambios de parámetro que manda o teclado polo MIDI. Sen mostras; a única latencia é a do limitador de seguridade, 1,5 ms (o DAW compénsaa só).
 
 O motor emula a máquina chip a chip: o programa das dúas CPU (o asignador de voces e a CPU que calcula as envolventes, o LFO e as tensións de control, coas súas táboas e redondeos), os contadores 8253 que marcan o ton dos DCO, o integrador da rampa, o filtro IR3109, os VCA, o filtro paso alto e o chorus de dous BBD.
 
@@ -49,7 +49,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 - **O DCO** (`Source/xuno/Voice.h`): un contador do 8253 en modo 3 (a conta nova entra en cada medio ciclo) a 1, 2 ou 4 MHz descarga un integrador; o pulso sae dun comparador coa rampa e o sub dun biestable. O tempo vai en tics de 8 MHz enteiros e os saltos, no seu instante exacto con polyBLEP. O ton ten os mesmos erros de redondeo ca o orixinal (±3 cents) e as notas máis altas perden nivel cando o DAC da rampa satura.
 - **O VCF**: catro OTA en serie (IR3109), cada un cun tanh, e a realimentación por un VCA que satura; resolto sen atraso. O corte segue as dúas referencias do axuste do manual de servizo.
 - **A placa** (`Source/xuno/Board.h`): o HPF (o realce de graves cos valores do esquema; 236 e 754 Hz), o VCA xeral (±10 dB) e o chorus: dous MN3009 de verdade, cada un co seu reloxo movido polo LFO do chorus en contrafase, mostrando o sinal en cada pulso, cos seus filtros de entrada e de saída.
-- Todo vai a 190 476 Hz (8 MHz / 42) e pasa á frecuencia do DAW cun filtro de fase mínima (sen latencia). Á saída, un limitador de seguridade: nunca pasa de −1 dBFS.
+- Todo vai a 190 476 Hz (8 MHz / 42) e pasa á frecuencia do DAW cun filtro de fase mínima (sen latencia). Á saída, un limitador de seguridade: nunca pasa de −1 dBFS, e mira 1,5 ms por diante para baixar suave antes dos picos (sen distorsión).
 
 ## Estrutura
 
@@ -69,7 +69,7 @@ Avisan porque os instaladores non levan sinatura de pago, non porque haxa nada r
 | `tools/enginetest.cpp` | Proba do motor sen JUCE: afinación, LFO, envolventes, VCF, velocidade |
 | `tools/RenderTest.cpp` | Proba do plugin: SysEx, programas, estado, .syx, asignación, bloques, A/B, presets, desfacer, o limitador e os 128 sons |
 
-Usa o núcleo común de Escoita ([escoita-nucleo](https://github.com/callejodev-dotcom/escoita-nucleo), v0.2.0): o texto en galego, o aviso das versións novas, os presets propios, o A/B e o desfacer (`escoita::Estado`; a memoria vai coma estado propio), o limitador de seguridade (`escoita::Teito`), a CI e os instaladores. O pedal e o reparto de voces son os do firmware do Juno-106 emulado, non `Sostido` e `Voces` do núcleo: esas reteñen as notas co pedal e cambiarían o que soa.
+Usa o núcleo común de Escoita ([escoita-nucleo](https://github.com/callejodev-dotcom/escoita-nucleo), v0.5.0): o texto en galego, o aviso das versións novas, os presets propios, o A/B e o desfacer (`escoita::Estado`; a memoria vai coma estado propio), o limitador de seguridade (`escoita::Teito`), a CI e os instaladores. O pedal e o reparto de voces son os do firmware do Juno-106 emulado, non `Sostido` e `Voces` do núcleo: esas reteñen as notas co pedal e cambiarían o que soa.
 
 ## Probas
 
